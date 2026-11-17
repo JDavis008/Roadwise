@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Roadwise</title>
+<meta name="description" content="Free GPS navigation with voice turn-by-turn, Waze-style road reports and live location sharing.">
+<meta name="theme-color" content="#1a73e8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Roadwise">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map" aria-label="Map"></div>
+
+<!-- Browse mode: search bar + category chips -->
+<header id="top" class="top">
+  <div class="searchbar">
+    <button id="btnMenu" class="icon-btn" aria-label="Settings">☰</button>
+    <input id="q" type="search" placeholder="Search Roadwise" autocomplete="off" enterkeyhint="search" aria-label="Search places">
+    <button id="btnClear" class="icon-btn hidden" aria-label="Clear search">✕</button>
+  </div>
+  <div id="chips" class="chips" role="list"></div>
+  <div id="results" class="results hidden" role="listbox"></div>
+</header>
+
+<!-- Navigation banner -->
+<div id="banner" class="banner hidden" aria-live="polite">
+  <div class="banner-main">
+    <div id="bTurn" class="turn"></div>
+    <div class="banner-text">
+      <div id="bDist" class="b-dist"></div>
+      <div id="bText" class="b-text"></div>
+    </div>
+  </div>
+  <div id="bThen" class="b-then hidden"></div>
+</div>
+<div id="alert" class="alert hidden" role="alert"></div>
+
+<!-- Floating buttons -->
+<div id="fabs" class="fabs">
+  <button id="btnLayers" class="fab" aria-label="Map layers">🗺️</button>
+  <button id="btnShare" class="fab" aria-label="Share location">📍</button>
+  <button id="btnReport" class="fab fab-report" aria-label="Report on the road">⚠️</button>
+  <button id="btnLocate" class="fab fab-locate" aria-label="Show my location">➤</button>
+</div>
+<button id="btnRecenter" class="recenter hidden">⌖ Re-center</button>
+
+<div id="speed" class="speed hidden">
+  <div id="limit" class="limit hidden"><small>SPEED<br>LIMIT</small><b id="limitVal"></b></div>
+  <div id="speedNow" class="speed-now"><b id="speedVal">0</b><small id="speedUnit">mph</small></div>
+</div>
+
+<!-- Bottom sheet (place / routes / navigation) -->
+<section id="sheet" class="sheet hidden" aria-live="polite"></section>
+
+<!-- Full-screen panels -->
+<div id="panel" class="panel hidden" role="dialog" aria-modal="true"></div>
+<div id="toast" class="toast hidden" role="status"></div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
