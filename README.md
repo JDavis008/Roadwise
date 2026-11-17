@@ -11,6 +11,12 @@ A GPS navigation app for Android and iPhone that mixes Google Maps–style searc
 - 📶 Works with no signal: download a whole state's maps, routing and search in one tap
 - 🆓 No account, no ads, no API keys; it uses only free, open map services
 
+<p>
+  <img src="docs/screenshots/routes.png" width="240" alt="Choosing between three routes">
+  <img src="docs/screenshots/navigation.png" width="240" alt="Turn-by-turn navigation with speed limit">
+  <img src="docs/screenshots/satellite.png" width="240" alt="Satellite view">
+</p>
+
 ## Download
 
 ### Android
