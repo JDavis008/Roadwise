@@ -1,0 +1,53 @@
+# Cloud Mac builds for the native iPhone app (ios/). Connect this repo at https://codemagic.io,
+# then start "iOS build (unsigned simulator)". The signed TestFlight workflow needs an
+# Apple Developer account (App Store Connect API key added in Codemagic).
+workflows:
+  ios-simulator:
+    name: iOS build (unsigned simulator)
+    instance_type: mac_mini_m2
+    max_build_duration: 45
+    environment:
+      xcode: latest
+    scripts:
+      - name: Generate the Xcode project
+        script: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+      - name: Build and run the smoke test on a simulator
+        script: |
+          cd ios
+          SIM=$(xcrun simctl list devices available | grep -m1 -oE 'iPhone 1[5-9][^(]*' | sed 's/ *$//')
+          echo "Using simulator: $SIM"
+          xcodebuild test -project Roadwise.xcodeproj -scheme Roadwise \
+            -destination "platform=iOS Simulator,name=$SIM" \
+            -resultBundlePath build/Smoke.xcresult \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Export screenshots
+        script: |
+          cd ios
+          mkdir -p build/screens
+          xcrun xcresulttool export attachments --path build/Smoke.xcresult --output-path build/screens || true
+    artifacts:
+      - ios/build/screens/**
+      - ios/build/Smoke.xcresult
+
+#  ios-testflight:
+#    name: iOS TestFlight (signed)
+#    instance_type: mac_mini_m2
+#    integrations:
+#      app_store_connect: <your App Store Connect API key name>
+#    environment:
+#      ios_signing:
+#        distribution_type: app_store
+#        bundle_identifier: com.roadwise.app
+#      xcode: latest
+#    scripts:
+#      - script: brew install xcodegen && cd ios && xcodegen generate
+#      - script: xcode-project use-profiles --project ios/Roadwise.xcodeproj
+#      - script: cd ios && xcode-project build-ipa --project Roadwise.xcodeproj --scheme Roadwise
+#    artifacts:
+#      - ios/build/ios/ipa/*.ipa
+#    publishing:
+#      app_store_connect:
+#        auth: integration
+#        submit_to_testflight: true
