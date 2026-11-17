@@ -50,10 +50,18 @@ struct ContentView: View {
     private var map: some View {
         MapReader { proxy in
             Map(position: $app.camera) {
-                ForEach(Array(app.routes.enumerated()), id: \.element.id) { i, r in
-                    MapPolyline(coordinates: r.points)
-                        .stroke(i == app.selected ? Color.blue : Color.gray.opacity(0.75),
-                                style: StrokeStyle(lineWidth: i == app.selected ? 8 : 6, lineCap: .round, lineJoin: .round))
+                if let lines = navLines() {
+                    // Navigating: the part already driven is gray, the rest blue.
+                    MapPolyline(coordinates: lines.done)
+                        .stroke(Color.gray.opacity(0.8), style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
+                    MapPolyline(coordinates: lines.rest)
+                        .stroke(Color.blue, style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
+                } else {
+                    ForEach(Array(app.routes.enumerated()), id: \.element.id) { i, r in
+                        MapPolyline(coordinates: r.points)
+                            .stroke(i == app.selected ? Color.blue : Color.gray.opacity(0.75),
+                                    style: StrokeStyle(lineWidth: i == app.selected ? 8 : 6, lineCap: .round, lineJoin: .round))
+                    }
                 }
                 if let p = app.place {
                     Marker(p.name, coordinate: p.coordinate).tint(.red)
@@ -136,6 +144,15 @@ struct ContentView: View {
         case .routes: Card { RoutesCard() }
         case .nav: Card { NavBottomBar(showShare: $showShare, showReport: $showReport) }
         }
+    }
+
+    /// The route split at your snapped position, while navigating.
+    private func navLines() -> (done: [Coord], rest: [Coord])? {
+        guard let n = app.nav, let snapped = n.state.snapped else { return nil }
+        let pts = n.route.points
+        guard pts.count > 1 else { return nil }
+        let i = max(0, min(n.progressSegment, pts.count - 2))
+        return (Array(pts[0...i]) + [snapped], [snapped] + Array(pts[(i + 1)...]))
     }
 
     private func reportAge(_ r: Report) -> String {

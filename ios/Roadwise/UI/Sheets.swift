@@ -132,6 +132,7 @@ struct SettingsView: View {
                     Toggle("Speeding chime", isOn: $settings.speedAlert)
                     Stepper("Chime when \(settings.tolerance) \(Units.speedUnit(settings.imperial)) over", value: $settings.tolerance, in: 0...20)
                     Toggle("Report alerts", isOn: $settings.reportAlerts)
+                    Toggle("Speed camera alerts", isOn: $settings.cameraAlerts)
                     Toggle("Avoid tolls", isOn: $settings.avoidTolls)
                     Toggle("Avoid highways", isOn: $settings.avoidHighways)
                     Toggle("Avoid ferries", isOn: $settings.avoidFerries)

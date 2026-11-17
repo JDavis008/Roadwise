@@ -4,6 +4,7 @@ import XCTest
 final class SmokeUITests: XCTestCase {
     func testLaunchAndSearch() throws {
         let app = XCUIApplication()
+        app.launchEnvironment["ROADWISE_TEST_ORIGIN"] = "39.9612,-82.9988"   // downtown Columbus, OH
         app.launch()
 
         // Allow the location prompt if it appears.
@@ -27,6 +28,20 @@ final class SmokeUITests: XCTestCase {
             firstResult.tap()
             XCTAssertTrue(directions.waitForExistence(timeout: 10), "Place card should show Directions")
             attach(app, "3-place")
+
+            // Plan a route and drive it in preview mode.
+            directions.tap()
+            let preview = app.buttons["Preview"]
+            XCTAssertTrue(preview.waitForExistence(timeout: 30), "Routes should load")
+            let enabled = NSPredicate(format: "isEnabled == true")
+            expectation(for: enabled, evaluatedWith: preview)
+            waitForExpectations(timeout: 30)
+            attach(app, "4-routes")
+            preview.tap()
+            XCTAssertTrue(app.buttons["End"].waitForExistence(timeout: 10), "Navigation should start")
+            sleep(8)
+            attach(app, "5-navigation")
+            app.buttons["End"].tap()
         } else {
             attach(app, "2-no-results")
         }

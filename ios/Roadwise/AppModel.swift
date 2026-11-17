@@ -56,7 +56,14 @@ final class AppModel: ObservableObject {
     }
 
     var here: Coord? { location.fix?.coordinate }
-    var origin: Coord? { here }
+    var origin: Coord? { here ?? Self.testOrigin }
+
+    /// UI tests run on a simulator with no GPS fix; they pass a start point as "lat,lon".
+    static let testOrigin: Coord? = {
+        guard let s = ProcessInfo.processInfo.environment["ROADWISE_TEST_ORIGIN"] else { return nil }
+        let p = s.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        return p.count == 2 ? Coord(latitude: p[0], longitude: p[1]) : nil
+    }()
 
     func show(_ message: String) {
         toast = message

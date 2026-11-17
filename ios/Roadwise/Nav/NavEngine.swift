@@ -43,6 +43,10 @@ final class NavEngine: ObservableObject {
     private var offCount = 0
     private var alerted = Set<String>()
     private var hazards: [(Report, Double)] = []
+    /// Speed cameras on the route and their distance along it.
+    private var cameras: [(SpeedCamera, Double)] = []
+    /// Index of the route segment you're on (for drawing the driven part).
+    var progressSegment: Int { seg }
     private var lastReroute = Date.distantPast
     private var overSince: Date?
     private var lastChime = Date.distantPast
@@ -61,6 +65,7 @@ final class NavEngine: ObservableObject {
         state.next = route.maneuvers.count > 1 ? route.maneuvers[1] : route.maneuvers.first
         rebuildHazards()
         loadLimits()
+        loadCameras()
         let first = route.maneuvers.first
         voice.speak("Starting route to \(destination.name). \(Units.spoken(route.distance, imperial: settings.imperial)), about "
                     + Units.duration(route.duration).replacingOccurrences(of: "hr", with: "hours").replacingOccurrences(of: "min", with: "minutes")
@@ -71,6 +76,17 @@ final class NavEngine: ObservableObject {
         let r = route
         Task {
             if let limits = await RoutingService.speedLimits(for: r), r === self.route { r.limits = limits }
+        }
+    }
+
+    private func loadCameras() {
+        let r = route
+        cameras = []
+        guard r.mode == .drive else { return }
+        Task {
+            let found = await CameraService.cameras(near: r.points)
+            guard r === self.route else { return }
+            self.cameras = found.compactMap { cam in self.along(cam.coordinate, maxOff: 35).map { (cam, $0) } }
         }
     }
 
@@ -186,23 +202,38 @@ final class NavEngine: ObservableObject {
     }
 
     private func checkAlerts(_ progress: Double, _ speed: Double) {
-        guard settings.reportAlerts else { return }
         let look = route.mode == .drive ? min(1200, max(500, speed * 40)) : 200
+        if settings.cameraAlerts && route.mode == .drive {
+            for (cam, at) in cameras {
+                let ahead = at - progress
+                guard ahead >= 0, ahead <= look * 0.7, !alerted.contains(cam.id) else { continue }
+                alerted.insert(cam.id)
+                voice.speak("Speed camera ahead")
+                let limit = cam.maxspeedKmh > 0 ? " · limit \(Units.limit(cam.maxspeedKmh, imperial: settings.imperial)) \(Units.speedUnit(settings.imperial))" : ""
+                show(NavAlert(id: cam.id, emoji: "📷", title: "Speed camera",
+                              detail: "\(Units.distance(ahead, imperial: settings.imperial)) ahead\(limit)", report: nil), seconds: 15)
+                return
+            }
+        }
+        guard settings.reportAlerts else { return }
         for (rep, at) in hazards {
             let ahead = at - progress
             if ahead >= 0 && ahead <= look && !alerted.contains(rep.id) {
                 alerted.insert(rep.id)
                 let t = rep.kind
                 voice.speak(t.spoken)
-                let alert = NavAlert(id: rep.id, emoji: t.emoji, title: t.label,
-                                     detail: "\(Units.distance(ahead, imperial: settings.imperial)) ahead" + (rep.by.isEmpty ? "" : " · by \(rep.by)"), report: rep)
-                state.alert = alert
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(nanoseconds: 20_000_000_000)
-                    if self?.state.alert?.id == alert.id { self?.state.alert = nil }
-                }
+                show(NavAlert(id: rep.id, emoji: t.emoji, title: t.label,
+                              detail: "\(Units.distance(ahead, imperial: settings.imperial)) ahead" + (rep.by.isEmpty ? "" : " · by \(rep.by)"), report: rep), seconds: 20)
                 return
             }
+        }
+    }
+
+    private func show(_ alert: NavAlert, seconds: UInt64) {
+        state.alert = alert
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            if self?.state.alert?.id == alert.id { self?.state.alert = nil }
         }
     }
 
@@ -238,6 +269,7 @@ final class NavEngine: ObservableObject {
                 resetProgress()
                 rebuildHazards()
                 loadLimits()
+                loadCameras()
                 onReroute?(nr)
             } catch {
                 voice.speak("Couldn't reroute")

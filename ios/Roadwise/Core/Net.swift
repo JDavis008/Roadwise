@@ -31,6 +31,18 @@ enum Net {
         return try await send(req)
     }
 
+    static func postForm(_ url: URL, fields: [String: String], timeout: TimeInterval = 15) async throws -> JSON {
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = timeout
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        req.httpBody = fields.map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed) ?? "")" }
+            .joined(separator: "&").data(using: .utf8)
+        return try await send(req)
+    }
+
     private static func send(_ req: URLRequest) async throws -> JSON {
         let (data, response) = try await session.data(for: req)
         let obj = (try? JSONSerialization.jsonObject(with: data)) as? JSON

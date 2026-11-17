@@ -10,6 +10,7 @@ final class AppSettings: ObservableObject {
     @Published var speedAlert: Bool { didSet { d.set(speedAlert, forKey: "speedAlert") } }
     @Published var tolerance: Int { didSet { d.set(tolerance, forKey: "tolerance") } }
     @Published var reportAlerts: Bool { didSet { d.set(reportAlerts, forKey: "reportAlerts") } }
+    @Published var cameraAlerts: Bool { didSet { d.set(cameraAlerts, forKey: "cameraAlerts") } }
     @Published var avoidTolls: Bool { didSet { d.set(avoidTolls, forKey: "avoidTolls") } }
     @Published var avoidHighways: Bool { didSet { d.set(avoidHighways, forKey: "avoidHighways") } }
     @Published var avoidFerries: Bool { didSet { d.set(avoidFerries, forKey: "avoidFerries") } }
@@ -26,6 +27,7 @@ final class AppSettings: ObservableObject {
         speedAlert = d.object(forKey: "speedAlert") as? Bool ?? true
         tolerance = d.object(forKey: "tolerance") as? Int ?? 5
         reportAlerts = d.object(forKey: "reportAlerts") as? Bool ?? true
+        cameraAlerts = d.object(forKey: "cameraAlerts") as? Bool ?? true
         avoidTolls = d.bool(forKey: "avoidTolls")
         avoidHighways = d.bool(forKey: "avoidHighways")
         avoidFerries = d.bool(forKey: "avoidFerries")
