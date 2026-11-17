@@ -25,6 +25,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .searchbar input::-webkit-search-cancel-button { display: none; }
 .icon-btn { border: 0; background: transparent; width: 40px; height: 40px; border-radius: 50%; font-size: 20px; color: var(--fg2); }
 .icon-btn:active { background: var(--bg2); }
+.icon-btn.listening { background: var(--red); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { transform: scale(1.12); } }
 .chips { display: flex; gap: 8px; overflow-x: auto; padding: 10px 2px 4px; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
 .chip { flex: none; border: 0; background: var(--bg); color: var(--fg); border-radius: 18px; padding: 7px 13px; box-shadow: var(--shadow); font-size: 14px; white-space: nowrap; }

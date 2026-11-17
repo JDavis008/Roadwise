@@ -31,7 +31,7 @@ const store = {
 };
 const settings = Object.assign({
   imperial: !/^(en-GB|fr|de|es-ES|it|nl|sv|da|nb|fi|pl|pt-PT)/.test(navigator.language || 'en-US') || /US$/.test(navigator.language || ''),
-  voice: true, speedAlert: true, tolerance: 5, reportAlerts: true,
+  voice: true, speedAlert: true, tolerance: 5, reportAlerts: true, cameraAlerts: true,
   avoidTolls: false, avoidHighways: false, avoidFerries: false,
   theme: 'auto', satellite: false, nickname: '', server: '', mode: 'auto',
 }, store.get('settings', {}));
@@ -418,7 +418,8 @@ function currentStyleKey() { return (settings.satellite || wantNight()) ? 'night
 function applyTheme() {
   document.body.classList.toggle('night', wantNight() || settings.satellite);
   const key = currentStyleKey();
-  if (map && key !== styleKey) { styleKey = key; map.setStyle(STYLES[key]); }
+  // diff:false forces a full reload so 'style.load' fires and our route/satellite layers get re-added.
+  if (map && key !== styleKey) { styleKey = key; map.setStyle(STYLES[key], { diff: false }); }
   else if (map && map.isStyleLoaded()) addOverlays();
 }
 
@@ -541,8 +542,28 @@ class Nav {
     this.route = route; this.dest = dest; this.reset();
     this.state = { remaining: route.distance, remainingS: route.duration, eta: Date.now() + route.duration * 1000, next: route.maneuvers[1] || route.maneuvers[0], nextIdx: 1, distToNext: 0, then: null, bearing: null, snapped: null, speedLimit: 0, offRoute: false, arrived: false, alert: null };
     this.lastReroute = 0; this.rerouting = false; this.overSince = 0; this.lastChime = 0;
+    this.cameras = [];
     this.rebuildHazards();
     fetchSpeedLimits(route);
+    this.loadCameras();
+  }
+  // Fixed speed cameras mapped in OpenStreetMap along the route (driving only).
+  async loadCameras() {
+    const r = this.route;
+    if (r.mode !== 'drive') return;
+    const bb = r.points.reduce((b, p) => [Math.min(b[0], p[0]), Math.min(b[1], p[1]), Math.max(b[2], p[0]), Math.max(b[3], p[1])], [180, 90, -180, -90]);
+    if ((bb[2] - bb[0]) * (bb[3] - bb[1]) > 16) return;   // very long trips: skip rather than hammer Overpass
+    const q = `[out:json][timeout:20];node[highway=speed_camera](${bb[1] - 0.01},${bb[0] - 0.01},${bb[3] + 0.01},${bb[2] + 0.01});out 500;`;
+    for (const host of ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter']) {
+      try {
+        const j = await getJSON(host, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 });
+        if (nav !== this || this.route !== r) return;
+        const kmh = raw => { const n = parseInt(raw, 10) || 0; return /mph/i.test(raw || '') ? n * 1.609344 : n; };
+        this.cameras = j.elements.map(e => ({ id: 'cam-' + e.id, lon: e.lon, lat: e.lat, maxspeed: kmh(e.tags?.maxspeed) }))
+          .map(c => [c, this.along([c.lon, c.lat], 35)]).filter(([, at]) => at != null);
+        return;
+      } catch { /* try the next mirror */ }
+    }
   }
   reset() { this.seg = 0; this.spoken = new Map(); this.postSpoken = new Set(); this.off = 0; this.alerted = new Set(); }
   rebuildHazards() {
@@ -599,6 +620,7 @@ class Nav {
       renderNav(); if (live.active && live.untilArrival) live.push(true).finally(() => live.stop());
       return;
     }
+    drawNavProgress();
     this.announce(ni, next, s.distToNext, loc.speed || 0, s.then);
     this.checkAlerts(progress, loc.speed || 0);
     this.checkSpeed(loc.speed || 0, s.speedLimit);
@@ -626,15 +648,24 @@ class Nav {
     }
   }
   checkAlerts(progress, speed) {
-    if (!settings.reportAlerts) return;
     const look = this.route.mode === 'drive' ? Math.min(1200, Math.max(500, speed * 40)) : 200;
-    for (const [rep, at] of this.hazards) {
+    if (settings.reportAlerts) for (const [rep, at] of this.hazards) {
       const ahead = at - progress;
       if (ahead >= 0 && ahead <= look && !this.alerted.has(rep.id)) {
         this.alerted.add(rep.id);
         const t = RTYPES[rep.type] || RTYPES.hazard;
         voice.speak(t.spoken);
         showAlert(t.emoji, t.label, `${U.dist(ahead)} ahead${rep.by ? ' · by ' + rep.by : ''}`, rep);
+        return;
+      }
+    }
+    if (this.route.mode !== 'drive' || !settings.cameraAlerts) return;
+    for (const [cam, at] of this.cameras) {
+      const ahead = at - progress;
+      if (ahead >= 0 && ahead <= look * 0.7 && !this.alerted.has(cam.id)) {
+        this.alerted.add(cam.id);
+        voice.speak('Speed camera ahead');
+        showAlert('📷', 'Speed camera', `${U.dist(ahead)} ahead${cam.maxspeed ? ` · limit ${U.limit(cam.maxspeed)} ${U.unit()}` : ''}`);
         return;
       }
     }
@@ -655,7 +686,7 @@ class Nav {
     try {
       const [nr] = await getRoutes(loc.pos, this.route.dest, this.route.mode, loc.speed > 2 ? loc.heading : null, false);
       if (nav !== this) return;
-      this.route = nr; this.reset(); this.rebuildHazards(); fetchSpeedLimits(nr);
+      this.route = nr; this.reset(); this.rebuildHazards(); fetchSpeedLimits(nr); this.loadCameras();
       ui.routes = [nr]; ui.selected = 0; drawRoutes();
     } catch (e) { toast('Couldn\'t reroute: ' + e.message); }
     finally { this.rerouting = false; this.state.offRoute = false; renderNav(); }
@@ -757,7 +788,7 @@ function placeRow(p, onclick) {
 
 // ---------- search UI
 let searchTimer, searchSeq = 0;
-function showResults(nodes) { const r = $('#results'); r.replaceChildren(...nodes); r.classList.remove('hidden'); }
+function showResults(nodes) { const r = $('#results'); r.replaceChildren(...nodes.filter(Boolean)); r.classList.remove('hidden'); }
 function hideResults() { $('#results').classList.add('hidden'); }
 function showDefaultList() {
   const rows = [];
@@ -843,6 +874,13 @@ function drawRoutes() {
   const feats = ui.routes.map((r, idx) => ({ type: 'Feature', properties: { idx, sel: idx === ui.selected ? 1 : 0 }, geometry: { type: 'LineString', coordinates: r.points } }));
   map.getSource('routes').setData({ type: 'FeatureCollection', features: feats });
 }
+// While navigating: the part already driven turns gray, the rest stays blue.
+function drawNavProgress() {
+  if (!nav || !map.getSource('routes') || !nav.state.snapped) return;
+  const pts = nav.route.points, i = nav.seg, p = nav.state.snapped;
+  const line = (coords, sel) => ({ type: 'Feature', properties: { idx: 0, sel }, geometry: { type: 'LineString', coordinates: coords } });
+  map.getSource('routes').setData({ type: 'FeatureCollection', features: [line(pts.slice(0, i + 1).concat([p]), 0), line([p].concat(pts.slice(i + 1)), 1)] });
+}
 function fitRoutes() {
   if (!ui.routes.length) return;
   const b = new maplibregl.LngLatBounds(); ui.routes.forEach(r => r.points.forEach((p, i) => { if (i % 5 === 0) b.extend(p); })); b.extend(ui.routes[0].points[ui.routes[0].points.length - 1]);
@@ -910,10 +948,12 @@ function updateSpeed() {
 let alertTimer;
 function showAlert(emoji, title, detail, rep) {
   const a = $('#alert');
-  a.replaceChildren(h('span', { class: 'e' }, emoji), h('div', {}, h('b', {}, title), h('small', {}, detail)),
+  a.replaceChildren(...[h('span', { class: 'e' }, emoji), h('div', {}, h('b', {}, title), h('small', {}, detail)),
     rep && h('button', { class: 'btn small', onclick: () => { voteReport(rep, true); a.classList.add('hidden'); } }, '👍'),
-    rep && h('button', { class: 'btn small', onclick: () => { voteReport(rep, false); a.classList.add('hidden'); } }, 'Gone'));
+    rep && h('button', { class: 'btn small', onclick: () => { voteReport(rep, false); a.classList.add('hidden'); } }, 'Gone')].filter(Boolean));
   a.classList.remove('hidden');
+  const b = $('#banner').getBoundingClientRect();
+  a.style.top = b.height ? `${Math.round(b.bottom + 10)}px` : '';
   clearTimeout(alertTimer); alertTimer = setTimeout(() => a.classList.add('hidden'), 20000);
 }
 
@@ -969,7 +1009,7 @@ function renderSheet() {
       h('button', { class: 'round', 'aria-label': 'Share trip', onclick: shareTrip }, live.active ? '🔴' : '↗'),
       h('button', { class: 'btn danger', onclick: endNav }, s.arrived ? 'Done' : 'End'))];
   }
-  sh.replaceChildren(...kids);
+  sh.replaceChildren(...kids.filter(Boolean));
   requestAnimationFrame(() => { fabs.style.bottom = `${sh.offsetHeight + 16}px`; });
 }
 
@@ -1040,7 +1080,7 @@ function liveRows(navigating, tripText = '') {
 // ------------------------------------------------------------------ panels (settings etc.)
 function openPanel(title, body) {
   const p = $('#panel');
-  p.replaceChildren(h('div', { class: 'panel-inner' }, h('header', {}, h('h2', {}, title), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: closePanel }, '✕')), ...[body].flat()));
+  p.replaceChildren(h('div', { class: 'panel-inner' }, h('header', {}, h('h2', {}, title), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: closePanel }, '✕')), ...[body].flat(Infinity).filter(Boolean)));
   p.classList.remove('hidden'); p.scrollTop = 0;
 }
 function closePanel() { $('#panel').classList.add('hidden'); }
@@ -1074,6 +1114,7 @@ function openSettings() {
       toggle('speedAlert', 'Speeding chime', 'Plays a chime when you go over the limit'),
       h('div', { class: 'opt' }, h('span', { class: 'lbl' }, 'Chime tolerance', h('small', {}, `How far over the limit, in ${U.unit()}`)), tol),
       toggle('reportAlerts', 'Report alerts', 'Spoken warnings for reports on your route'),
+      toggle('cameraAlerts', 'Speed camera alerts', 'Fixed cameras mapped in OpenStreetMap'),
       toggle('avoidTolls', 'Avoid tolls'), toggle('avoidHighways', 'Avoid highways'), toggle('avoidFerries', 'Avoid ferries')),
     h('div', { class: 'group' }, h('h3', {}, 'Reports and live sharing'),
       h('div', { class: 'opt col' }, h('span', { class: 'lbl' }, 'Your name'), nick),
@@ -1125,6 +1166,25 @@ function wire() {
   q.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(searchTimer); runSearch(q.value); } if (e.key === 'Escape') { hideResults(); q.blur(); } });
   $('#btnClear').addEventListener('click', () => { q.value = ''; $('#btnClear').classList.add('hidden'); hideResults(); q.focus(); });
   $('#btnMenu').addEventListener('click', openSettings);
+  // Voice search where the browser supports it (Safari on iPhone does).
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR) {
+    const mic = $('#btnMic'); mic.classList.remove('hidden');
+    let rec = null;
+    mic.addEventListener('click', () => {
+      if (rec) { rec.stop(); return; }
+      rec = new SR(); rec.lang = 'en-US'; rec.interimResults = true; rec.maxAlternatives = 1;
+      mic.classList.add('listening'); q.placeholder = 'Listening…';
+      rec.onresult = e => {
+        const text = Array.from(e.results).map(r => r[0].transcript).join('');
+        q.value = text; $('#btnClear').classList.toggle('hidden', !text);
+        if (e.results[e.results.length - 1].isFinal) runSearch(text);
+      };
+      rec.onerror = e => { if (e.error === 'not-allowed') toast('Allow microphone access to search by voice'); };
+      rec.onend = () => { rec = null; mic.classList.remove('listening'); q.placeholder = 'Search Roadwise'; };
+      try { rec.start(); } catch { rec = null; mic.classList.remove('listening'); }
+    });
+  }
   $('#btnLocate').addEventListener('click', () => { startLocation(true); enableCompass(); if (here) setFollow(!follow || ui.mode === 'nav'); else { toast('Finding your location…'); follow = true; $('#btnLocate').classList.add('follow'); } });
   $('#btnRecenter').addEventListener('click', () => setFollow(true));
   $('#btnReport').addEventListener('click', openReport);
