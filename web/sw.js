@@ -1,6 +1,6 @@
 // Roadwise service worker: caches the app itself plus every map tile you've looked at,
 // so the app opens and the map still shows with no signal.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL = `rw-shell-${VERSION}`;
 const TILES = 'rw-tiles';
 const SHELL_FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png',

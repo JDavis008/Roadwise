@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.png" width="128" alt="Roadwise logo"></p>
+
 # Roadwise
 
 A GPS navigation app for Android and iPhone that mixes Google Maps–style search and routing with Waze-style community alerts. The Android app works fully offline.
