@@ -426,8 +426,11 @@ function initMap() {
   const view = store.get('view', { c: [-98.5, 39.5], z: 3.6 });
   styleKey = currentStyleKey();
   document.body.classList.toggle('night', wantNight() || settings.satellite);
+  // A link like …/Roadwise/#15/40.0017/-83.0197 opens the map at that spot.
+  const m = location.hash.match(/^#(\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/);
+  if (m) { view.z = +m[1]; view.c = [+m[3], +m[2]]; store.set('hadFix', true); }
   map = new maplibregl.Map({ container: 'map', style: STYLES[styleKey], center: view.c, zoom: view.z, attributionControl: { compact: true }, maxPitch: 70 });
-  map.on('style.load', addOverlays);
+  map.on('style.load', () => { baseVisibility = null; addOverlays(); });
   map.on('moveend', () => {
     store.set('view', { c: map.getCenter().toArray(), z: map.getZoom() });
     syncReports();
@@ -452,12 +455,20 @@ function initMap() {
   puck = new maplibregl.Marker({ element: el, rotationAlignment: 'map', pitchAlignment: 'map' });
 }
 
+const OUR_LAYERS = ['sat', 'route-casing', 'route-line', 'route-hit'];
+let baseVisibility = null;   // the style's own layer visibility, captured when a style loads
 function addOverlays() {
   if (!map.getSource('sat')) map.addSource('sat', { type: 'raster', tiles: [SAT_TILES], tileSize: 256, maxzoom: 19, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' });
   const layers = map.getStyle().layers;
+  if (!baseVisibility) baseVisibility = Object.fromEntries(layers.filter(l => !OUR_LAYERS.includes(l.id)).map(l => [l.id, l.layout?.visibility || 'visible']));
   const firstSymbol = layers.find(l => l.type === 'symbol')?.id;
-  if (settings.satellite && !map.getLayer('sat')) map.addLayer({ id: 'sat', type: 'raster', source: 'sat' }, firstSymbol);
+  // Satellite: aerial photos at the bottom, base-map fills and lines hidden, street labels kept on top.
+  if (settings.satellite && !map.getLayer('sat')) map.addLayer({ id: 'sat', type: 'raster', source: 'sat' }, layers[0]?.id);
   if (!settings.satellite && map.getLayer('sat')) map.removeLayer('sat');
+  for (const l of layers) {
+    if (OUR_LAYERS.includes(l.id) || l.type === 'symbol' || !(l.id in baseVisibility)) continue;
+    map.setLayoutProperty(l.id, 'visibility', settings.satellite ? 'none' : baseVisibility[l.id]);
+  }
   if (!map.getSource('routes')) {
     map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     map.addLayer({ id: 'route-casing', type: 'line', source: 'routes', layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': ['get', 'sel'] }, paint: { 'line-color': ['case', ['==', ['get', 'sel'], 1], '#0b57d0', '#80868b'], 'line-width': ['interpolate', ['linear'], ['zoom'], 8, 6, 16, 14] } }, firstSymbol);

@@ -41,7 +41,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .results .empty { padding: 16px; color: var(--fg2); }
 
 /* ---------- floating buttons ---------- */
-.fabs { position: fixed; right: calc(var(--sr) + 12px); bottom: calc(var(--sb) + 24px); display: flex; flex-direction: column; gap: 12px; z-index: 4; transition: bottom .2s; }
+.fabs { position: fixed; right: calc(var(--sr) + 12px); bottom: calc(var(--sb) + 44px); display: flex; flex-direction: column; gap: 12px; z-index: 4; transition: bottom .2s; }
 .fab { width: 50px; height: 50px; border-radius: 50%; border: 0; background: var(--bg); box-shadow: var(--shadow); font-size: 21px; display: grid; place-items: center; }
 .fab:active { transform: scale(.94); }
 .fab-locate { color: var(--blue); font-size: 22px; transform: rotate(-45deg); }
