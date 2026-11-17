@@ -6,7 +6,7 @@ A SwiftUI version of Roadwise for iOS 17 and later. It uses Apple Maps for the m
 - Photon for search and nearby places
 - the optional Roadwise server for shared reports and live location
 
-**Features:** place search and nearby categories, Home/Work/Favorites and recent places, routes for car, bike and walking with up to 3 alternatives, voice turn-by-turn that keeps going with the screen locked, automatic rerouting, speed limit and a speeding chime, Waze-style reports with spoken alerts and routing around closures, live location sharing, satellite view, and a Preview drive.
+**Features:** speed-camera alerts, a gray trail for the part of the route already driven, place search and nearby categories, Home/Work/Favorites and recent places, routes for car, bike and walking with up to 3 alternatives, voice turn-by-turn that keeps going with the screen locked, automatic rerouting, speed limit and a speeding chime, Waze-style reports with spoken alerts and routing around closures, live location sharing, satellite view, and a Preview drive.
 
 > **Just want it on your iPhone today?** Use the web version: open **https://jdavis008.github.io/Roadwise/** in Safari, tap Share, then **Add to Home Screen**. The native app below needs a Mac to build.
 
@@ -27,4 +27,4 @@ In Xcode, select the **Roadwise** target › Signing & Capabilities, pick your T
 
 ## Status
 
-The app builds on Xcode (cloud Mac, Codemagic build #1, 2026-11-16) and passes the UI smoke test on the iPhone simulator: it launches, gets location permission, searches "Ohio Stadium" and opens the place card. It has not been tried on a real iPhone yet. CarPlay is not included: Apple has to approve the CarPlay navigation entitlement for each developer account.
+The app builds on Xcode (cloud Mac via Codemagic) and passes the UI smoke test on the iPhone simulator (latest: build #3, 2026-11-17). The test launches the app, allows location, searches "Ohio Stadium", opens the place card, plans routes, runs a preview drive and ends it. It has not been tried on a real iPhone yet. CarPlay is not included: Apple has to approve the CarPlay navigation entitlement for each developer account.
