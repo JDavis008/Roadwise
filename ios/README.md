@@ -27,4 +27,4 @@ In Xcode, select the **Roadwise** target › Signing & Capabilities, pick your T
 
 ## Status
 
-The Swift code was written on Windows and **has not been compiled yet**. Run the Codemagic workflow (or build in Xcode) once and fix any compile errors it reports. CarPlay is not included: Apple has to approve the CarPlay navigation entitlement for each developer account.
+The app builds on Xcode (cloud Mac, Codemagic build #1, 2026-11-16) and passes the UI smoke test on the iPhone simulator: it launches, gets location permission, searches "Ohio Stadium" and opens the place card. It has not been tried on a real iPhone yet. CarPlay is not included: Apple has to approve the CarPlay navigation entitlement for each developer account.
