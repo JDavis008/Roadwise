@@ -45,6 +45,18 @@ final class SmokeUITests: XCTestCase {
         } else {
             attach(app, "2-no-results")
         }
+
+        // Settings > Offline maps lists the downloadable states.
+        let settings = app.buttons["Settings"]
+        if settings.waitForExistence(timeout: 10) {
+            settings.tap()
+            let offline = app.buttons["Offline maps"]
+            XCTAssertTrue(offline.waitForExistence(timeout: 10), "Settings should have Offline maps")
+            offline.tap()
+            XCTAssertTrue(app.navigationBars["Offline maps"].waitForExistence(timeout: 10))
+            _ = app.staticTexts["Iowa"].waitForExistence(timeout: 20)
+            attach(app, "6-offline-maps")
+        }
     }
 
     private func attach(_ app: XCUIApplication, _ name: String) {
