@@ -16,15 +16,17 @@ class RouteService(
     suspend fun routes(
         from: LatLon, to: LatLon, mode: TravelMode,
         heading: Double? = null, avoid: List<LatLon> = emptyList(), alternates: Boolean = true,
+        via: List<Waypoint> = emptyList(),
     ): List<Route> {
         val s = prefs.current
         val tryOnline = s.routing != RoutingPreference.OFFLINE_ONLY && net.isOnline
         val canOffline = s.routing != RoutingPreference.ONLINE_ONLY
+        val stops = via.map { it.point }
         var onlineError: Exception? = null
         if (tryOnline) {
             try {
-                val r = online.route(from, to, mode, s, heading, avoid, if (alternates) 2 else 0)
-                if (r.isNotEmpty()) return r
+                val r = online.route(from, to, mode, s, heading, avoid, if (alternates) 2 else 0, stops)
+                if (r.isNotEmpty()) return r.map { it.withStops(via) }
             } catch (e: Exception) {
                 Log.w(TAG, "online routing failed", e)
                 onlineError = e
@@ -32,7 +34,7 @@ class RouteService(
         }
         if (canOffline) {
             try {
-                return listOf(offline.route(from, to, mode, s, heading, avoid))
+                return listOf(offline.route(from, to, mode, s, heading, avoid, stops).withStops(via))
             } catch (e: Exception) {
                 Log.w(TAG, "offline routing failed", e)
                 if (onlineError == null && !net.isOnline && s.routing != RoutingPreference.OFFLINE_ONLY) {

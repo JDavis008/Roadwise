@@ -7,13 +7,14 @@ enum RoutingService {
     static let base = "https://valhalla1.openstreetmap.de"
 
     static func routes(from: Coord, to: Coord, mode: TravelMode, options: RouteOptions,
-                       heading: Double? = nil, avoid: [Coord] = [], alternates: Bool = true,
+                       heading: Double? = nil, avoid: [Coord] = [], alternates: Bool = true, via: [Waypoint] = [],
                        offline data: OfflineData = .shared) async throws -> [Route] {
-        let canOffline = data.covers(from, to)
+        let canOffline = data.covers(from, to) && via.allSatisfy { data.covers($0.coordinate) }
         if Connectivity.shared.online || !canOffline {
             do {
-                return try trips(await online(request(from, to, mode, options, heading, avoid, alternates), avoid: avoid,
-                                              fallback: request(from, to, mode, options, heading, [], alternates)), mode: mode, dest: to)
+                return try trips(await online(request(from, to, mode, options, heading, avoid, alternates, via), avoid: avoid,
+                                              fallback: request(from, to, mode, options, heading, [], alternates, via)), mode: mode, dest: to)
+                    .map { $0.withStops(via) }
             } catch {
                 guard canOffline else {
                     if !Connectivity.shared.online {
@@ -24,21 +25,22 @@ enum RoutingService {
                 }
             }
         }
-        return try await offlineRoutes(from: from, to: to, mode: mode, options: options, heading: heading, avoid: avoid, alternates: alternates, data: data)
+        return try await offlineRoutes(from: from, to: to, mode: mode, options: options, heading: heading, avoid: avoid,
+                                       alternates: alternates, via: via, data: data)
     }
 
     /// Plans on the phone only (tests and the fallback above).
     static func offlineRoutes(from: Coord, to: Coord, mode: TravelMode, options: RouteOptions, heading: Double? = nil,
-                              avoid: [Coord] = [], alternates: Bool = true, data: OfflineData = .shared) async throws -> [Route] {
-        let req = request(from, to, mode, options, heading, avoid, alternates)
-        let plain = request(from, to, mode, options, heading, [], alternates)
+                              avoid: [Coord] = [], alternates: Bool = true, via: [Waypoint] = [], data: OfflineData = .shared) async throws -> [Route] {
+        let req = request(from, to, mode, options, heading, avoid, alternates, via)
+        let plain = request(from, to, mode, options, heading, [], alternates, via)
         let json: JSON = try await Task.detached(priority: .userInitiated) {
             do { return try data.router.route(req) } catch {
                 guard !avoid.isEmpty else { throw error }
                 return try data.router.route(plain)
             }
         }.value
-        return try trips(json, mode: mode, dest: to)
+        return try trips(json, mode: mode, dest: to).map { $0.withStops(via) }
     }
 
     private static func online(_ req: JSON, avoid: [Coord], fallback: JSON) async throws -> JSON {
@@ -64,7 +66,7 @@ enum RoutingService {
     }
 
     private static func request(_ from: Coord, _ to: Coord, _ mode: TravelMode, _ o: RouteOptions,
-                                _ heading: Double?, _ avoid: [Coord], _ alternates: Bool) -> JSON {
+                                _ heading: Double?, _ avoid: [Coord], _ alternates: Bool, _ via: [Waypoint] = []) -> JSON {
         var start: JSON = ["lat": from.latitude, "lon": from.longitude]
         if let h = heading { start["heading"] = Int(h); start["heading_tolerance"] = 60 }
         var costing: JSON = [:]
@@ -74,13 +76,15 @@ enum RoutingService {
         case .walk: costing["pedestrian"] = JSON()
         }
         let end: JSON = ["lat": to.latitude, "lon": to.longitude]
+        // Each stop ends a leg ("break"), so the route really goes there.
+        let stops: [JSON] = via.map { ["lat": $0.coordinate.latitude, "lon": $0.coordinate.longitude, "type": "break"] }
         var req: JSON = [
-            "locations": [start, end],
+            "locations": [start] + stops + [end],
             "costing": mode.costing, "costing_options": costing,
             "units": "kilometers", "language": "en-US", "id": "roadwise",
         ]
         if !avoid.isEmpty { req["exclude_locations"] = avoid.map { ["lat": $0.latitude, "lon": $0.longitude] } }
-        if alternates { req["alternates"] = 2 }
+        if alternates && via.isEmpty { req["alternates"] = 2 }   // Valhalla only offers alternatives without stops
         return req
     }
 

@@ -28,6 +28,11 @@ final class AppModel: ObservableObject {
     @Published var simulating = false
     @Published var saved: SavedPlaces
     @Published var toast: String?
+    /// Stops on the way to `place`, in order (before starting; while driving they live in the NavEngine).
+    @Published var stops: [Place] = []
+    /// The stop picker is open.
+    @Published var addingStop = false
+    static let maxStops = 5
     /// The visible map center, used when there's no GPS fix yet.
     var mapCenter: Coord?
 
@@ -102,7 +107,9 @@ final class AppModel: ObservableObject {
 
     func pick(_ p: Place) {
         saved.addRecent(p)
+        if addingStop { addStop(p); return }
         place = p
+        stops = []
         routes = []
         following = false
         cameraCommand = CameraCommand(.look(center: p.coordinate, distance: 1500, heading: 0, pitch: 0))
@@ -116,8 +123,32 @@ final class AppModel: ObservableObject {
 
     func closePlace() {
         place = nil
+        stops = []
         routes = []
         screen = .browse
+    }
+
+    // MARK: stops
+
+    /// Opens the stop picker: for the planned route, or the drive in progress.
+    func beginAddStop() { addingStop = true }
+
+    func addStop(_ p: Place) {
+        addingStop = false
+        if let n = nav, screen == .nav {
+            n.addStop(Waypoint(coordinate: p.coordinate, name: p.name))
+            show("Adding \(p.name) as a stop…")
+            return
+        }
+        guard stops.count < Self.maxStops else { show("Up to \(Self.maxStops) stops"); return }
+        stops.append(p)
+        Task { await planRoutes() }
+    }
+
+    func removeStop(at i: Int) {
+        guard stops.indices.contains(i) else { return }
+        stops.remove(at: i)
+        Task { await planRoutes() }
     }
 
     // MARK: routes
@@ -138,8 +169,12 @@ final class AppModel: ObservableObject {
         do {
             let mode = settings.travelMode
             let avoid = mode == .drive ? reports.closures(between: from, and: p.coordinate) : []
-            routes = try await RoutingService.routes(from: from, to: p.coordinate, mode: mode, options: settings.routeOptions,
-                                                     heading: (location.fix?.speed ?? 0) > 2 ? location.fix?.heading : nil, avoid: avoid)
+            let via = stops.map { Waypoint(coordinate: $0.coordinate, name: $0.name) }
+            let found = try await RoutingService.routes(from: from, to: p.coordinate, mode: mode, options: settings.routeOptions,
+                                                        heading: (location.fix?.speed ?? 0) > 2 ? location.fix?.heading : nil, avoid: avoid, via: via)
+            // A newer request (another stop added meanwhile) wins.
+            guard via == stops.map({ Waypoint(coordinate: $0.coordinate, name: $0.name) }), place == p else { return }
+            routes = found
             fitRoutes()
         } catch {
             routeError = "Couldn't find a route (\(error.localizedDescription))."
@@ -160,7 +195,11 @@ final class AppModel: ObservableObject {
         let r = routes[selected]
         let engine = NavEngine(route: r, destination: dest, settings: settings, voice: voice, reports: reports)
         engine.onArrive = { [weak self] in Task { await self?.live.arrived() } }
-        engine.onReroute = { [weak self] nr in self?.routes = [nr]; self?.selected = 0 }
+        engine.onReroute = { [weak self] nr in
+            self?.routes = [nr]; self?.selected = 0
+            // A preview drive follows the new route when a stop is added or skipped.
+            if self?.simulating == true { self?.simulate(nr) }
+        }
         cancellables.append(engine.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() })
         nav = engine
         routes = [r]
@@ -181,6 +220,8 @@ final class AppModel: ObservableObject {
         nav = nil
         routes = []
         place = nil
+        stops = []
+        addingStop = false
         screen = .browse
         following = false
         UIApplication.shared.isIdleTimerDisabled = false
@@ -205,6 +246,8 @@ final class AppModel: ObservableObject {
                 self.location.inject(Fix(coordinate: Geo.lerp(a, b, frac), accuracy: 5, speed: speed, heading: Geo.bearing(a, b), time: Date()))
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
+            // A cancelled drive was replaced by a new one (or ended): leave the flags to that.
+            guard !Task.isCancelled else { return }
             self?.simulating = false
             self?.location.simulating = false
         }

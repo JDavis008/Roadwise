@@ -26,6 +26,9 @@ data class Maneuver(
     val exit: Int = 0,
 )
 
+/** A stop on the way to the destination (gas, food, a friend's house...). */
+data class Waypoint(val point: LatLon, val name: String)
+
 class Route(
     val points: List<LatLon>,
     val maneuvers: List<Maneuver>,
@@ -41,6 +44,10 @@ class Route(
     val hasFerry: Boolean = false,
     val mode: TravelMode = TravelMode.DRIVE,
     val destination: LatLon = points.last(),
+    /** Stops before the destination, in driving order. */
+    val stops: List<Waypoint> = emptyList(),
+    /** Index into [points] where each stop is reached (same size as [stops]). */
+    val stopIndex: IntArray = IntArray(0),
 ) {
     val cumDist: DoubleArray = Geo.cumulative(points)
     val distanceM: Double get() = cumDist.last()
@@ -48,6 +55,32 @@ class Route(
     fun timeAt(segIndex: Int, t: Double): Double {
         if (segIndex >= points.size - 1) return cumTime.last()
         return cumTime[segIndex] + (cumTime[segIndex + 1] - cumTime[segIndex]) * t
+    }
+
+    /**
+     * The same route with [via] marked on it: finds where each stop is reached (in order) and
+     * adds an "Arrive at ..." instruction there, so turn-by-turn calls out each stop.
+     */
+    fun withStops(via: List<Waypoint>): Route {
+        if (via.isEmpty()) return this
+        val idx = IntArray(via.size)
+        var from = 0
+        for ((k, w) in via.withIndex()) {
+            var best = from; var bestD = Double.MAX_VALUE
+            for (i in from until points.size) {
+                val d = Geo.dist(points[i], w.point)
+                if (d < bestD) { bestD = d; best = i }
+            }
+            idx[k] = best
+            from = best
+        }
+        val ms = maneuvers.toMutableList()
+        for ((k, w) in via.withIndex()) {
+            ms += Maneuver(Turn.ARRIVE, "Arrive at ${w.name}", "Arrive at ${w.name}, your stop", null, idx[k])
+        }
+        // Stable sort keeps a turn at the same point as a stop after the stop.
+        val sorted = ms.withIndex().sortedWith(compareBy({ it.value.pointIndex }, { if (it.value.turn == Turn.ARRIVE && it.index >= maneuvers.size) 0 else 1 })).map { it.value }
+        return Route(points, sorted, durationS, cumTime, speedLimits, source, label, hasTolls, hasHighways, hasFerry, mode, destination, via, idx)
     }
 }
 

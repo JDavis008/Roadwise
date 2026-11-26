@@ -65,6 +65,8 @@ struct RoadwiseMapView: UIViewRepresentable {
         private var pinKey = ""
         private var reportPins: [String: ReportAnnotation] = [:]
         private var routeKey = ""
+        private var stopPins: [StopAnnotation] = []
+        private var stopKey = ""
 
         init(app: AppModel) { self.app = app }
 
@@ -108,6 +110,20 @@ struct RoadwiseMapView: UIViewRepresentable {
                     map.addAnnotation(a)
                     pin = a
                 }
+            }
+            // Stops on the way (numbered, in order)
+            let stopCoords = app.nav.map { $0.state.stops.map(\.coordinate) } ?? (app.screen == .routes ? app.stops.map(\.coordinate) : [])
+            let sk = stopCoords.map { "\($0.latitude),\($0.longitude)" }.joined(separator: "|")
+            if sk != stopKey {
+                stopKey = sk
+                map.removeAnnotations(stopPins)
+                stopPins = stopCoords.enumerated().map { i, c in
+                    let a = StopAnnotation()
+                    a.coordinate = c
+                    a.number = i + 1
+                    return a
+                }
+                map.addAnnotations(stopPins)
             }
             // Reports
             let current = Dictionary(app.reports.reports.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
@@ -188,6 +204,7 @@ struct RoadwiseMapView: UIViewRepresentable {
                     return mapView.dequeueReusableAnnotationView(withIdentifier: "puck") ?? .puck(annotation)
                 }
                 if let r = annotation as? ReportAnnotation { return .report(r) }
+                if let s = annotation as? StopAnnotation { return .stop(s) }
                 return nil   // the destination uses the default red pin
             }
         }

@@ -50,6 +50,7 @@ It has the map (day, night and satellite), search and nearby places, routes for 
 - Search for places, addresses and coordinates, with voice search and "nearby" categories (gas, food, coffee, parking, EV charging, groceries, hotels, hospitals)
 - Saved places (Home, Work, Favorites), recent searches, sharing a place, and opening `geo:` links from other apps
 - Routes for driving, biking and walking, up to 3 alternatives, and options to avoid tolls, highways or ferries
+- Stops on the way: add up to 5 (gas, food, coffee, any place) before you go or while driving. Each one is called out on arrival, and you can skip the next one. Works offline too
 
 **Navigation and alerts (like Waze)**
 - Turn-by-turn voice guidance (text-to-speech on the phone, so it works offline), automatic rerouting, ETA and arrival time

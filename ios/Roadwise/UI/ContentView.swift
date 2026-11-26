@@ -34,6 +34,7 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(app).environmentObject(settings) }
         .sheet(isPresented: $showReport) { ReportSheet().environmentObject(app).presentationDetents([.medium]) }
         .sheet(isPresented: $showShare) { ShareSheetView().environmentObject(app).environmentObject(settings).presentationDetents([.medium, .large]) }
+        .sheet(isPresented: $app.addingStop) { StopPicker().environmentObject(app).presentationDetents([.medium, .large]) }
         .confirmationDialog(selectedReport.map { "\($0.kind.emoji) \($0.kind.label)" } ?? "", isPresented: Binding(get: { selectedReport != nil }, set: { if !$0 { selectedReport = nil } }), titleVisibility: .visible) {
             if let r = selectedReport {
                 Button("Still there") { app.reports.vote(r, stillThere: true); app.show("Thanks for confirming") }
@@ -61,6 +62,13 @@ struct ContentView: View {
         case .nav:
             VStack(spacing: 8) {
                 NavBanner()
+                if let m = app.nav?.state.message {
+                    Button { app.nav?.clearMessage() } label: {
+                        Text(m).font(.footnote).padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(Color(white: 0.22), in: Capsule()).foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
+                }
                 if let a = app.nav?.state.alert { AlertCard(alert: a) }
             }
             .padding(.horizontal, 8)
@@ -73,6 +81,10 @@ struct ContentView: View {
         VStack(spacing: 12) {
             if app.screen != .nav {
                 Fab(symbol: settings.satellite ? "map.fill" : "globe.americas.fill") { settings.satellite.toggle() }
+            }
+            if app.screen == .nav && (app.nav?.state.stops.count ?? 0) < AppModel.maxStops {
+                Fab(symbol: "mappin.and.ellipse") { app.beginAddStop() }
+                    .accessibilityLabel("Add a stop")
             }
             Fab(symbol: "location.circle.fill") { showShare = true }
             Fab(symbol: "exclamationmark.triangle.fill", tint: .white, background: .orange) { showReport = true }

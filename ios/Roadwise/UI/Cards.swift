@@ -71,6 +71,27 @@ struct RoutesCard: View {
             .pickerStyle(.segmented)
             .onChange(of: settings.travelMode) { _, _ in Task { await app.planRoutes() } }
 
+            // Stops on the way, numbered like their map pins.
+            ForEach(Array(app.stops.enumerated()), id: \.offset) { i, p in
+                HStack(spacing: 10) {
+                    StopBadge(number: i + 1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(p.name).lineLimit(1)
+                        if !p.address.isEmpty { Text(p.address).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    }
+                    Spacer()
+                    Button { app.removeStop(at: i) } label: { Image(systemName: "xmark.circle.fill") }
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Remove stop \(p.name)")
+                }
+            }
+            if app.stops.count < AppModel.maxStops {
+                Button { app.beginAddStop() } label: {
+                    Label(app.stops.isEmpty ? "Add stop" : "Add another stop", systemImage: "mappin.and.ellipse")
+                }
+                .font(.subheadline)
+            }
+
             if app.loadingRoutes {
                 HStack { ProgressView(); Text("Finding the best routes…").foregroundStyle(.secondary) }
             } else if let err = app.routeError {
@@ -175,6 +196,16 @@ struct NavBanner: View {
     }
 }
 
+/// The orange numbered circle used for stops (list rows and map pins match).
+struct StopBadge: View {
+    let number: Int
+    var body: some View {
+        Text("\(number)").font(.footnote.bold()).foregroundStyle(.white)
+            .frame(width: 22, height: 22)
+            .background(Circle().fill(Color.orange))
+    }
+}
+
 struct AlertCard: View {
     @EnvironmentObject var app: AppModel
     let alert: NavAlert
@@ -238,21 +269,39 @@ struct NavBottomBar: View {
     var body: some View {
         if let n = app.nav {
             let s = n.state
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(s.arrived ? "Arrived" : Units.clock(s.eta)).font(.title2.bold()).foregroundStyle(.green)
-                    Text(s.arrived ? n.destination.name : "\(Units.duration(s.remainingTime)) · \(Units.distance(s.remaining, imperial: app.settings.imperial))\(app.simulating ? " · preview" : "")")
-                        .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+            VStack(spacing: 10) {
+                if let stop = s.stops.first, !s.arrived {
+                    // Next stop: how far, when, and a way to skip it.
+                    HStack(spacing: 10) {
+                        StopBadge(number: 1)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(stop.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                            Text("\(Units.distance(s.stopDist, imperial: app.settings.imperial)) · \(Units.duration(s.stopTime)) · \(Units.clock(s.stopEta))"
+                                 + (s.stops.count > 1 ? " · \(s.stops.count - 1) more" : ""))
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        Button("Skip") { n.removeStop(0) }.buttonStyle(.bordered).controlSize(.small)
+                    }
+                    .padding(.bottom, 2)
+                    Divider()
                 }
-                Spacer(minLength: 4)
-                roundButton(app.settings.voice ? "speaker.wave.2.fill" : "speaker.slash.fill") {
-                    app.settings.voice.toggle()
-                    if !app.settings.voice { app.voice.stop() }
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(s.arrived ? "Arrived" : Units.clock(s.eta)).font(.title2.bold()).foregroundStyle(.green)
+                        Text(s.arrived ? n.destination.name : "\(Units.duration(s.remainingTime)) · \(Units.distance(s.remaining, imperial: app.settings.imperial))\(app.simulating ? " · preview" : "")")
+                            .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                    roundButton(app.settings.voice ? "speaker.wave.2.fill" : "speaker.slash.fill") {
+                        app.settings.voice.toggle()
+                        if !app.settings.voice { app.voice.stop() }
+                    }
+                    roundButton("exclamationmark.triangle.fill") { showReport = true }
+                    roundButton(app.live.active ? "dot.radiowaves.left.and.right" : "square.and.arrow.up") { showShare = true }
+                    Button(s.arrived ? "Done" : "End") { app.endNav() }
+                        .buttonStyle(.borderedProminent).tint(.red).controlSize(.large)
                 }
-                roundButton("exclamationmark.triangle.fill") { showReport = true }
-                roundButton(app.live.active ? "dot.radiowaves.left.and.right" : "square.and.arrow.up") { showShare = true }
-                Button(s.arrived ? "Done" : "End") { app.endNav() }
-                    .buttonStyle(.borderedProminent).tint(.red).controlSize(.large)
             }
         }
     }

@@ -82,6 +82,7 @@ class MapController(private val ctx: Context, val map: MapLibreMap) {
     private var reports: List<Report> = emptyList()
     private var cameras: List<SpeedCamera> = emptyList()
     private var pin: Place? = null
+    private var stops: List<LatLon> = emptyList()
     private var results: List<Place> = emptyList()
     private var traveledTo: LatLon? = null
     private var lastLocation: Location? = null
@@ -282,6 +283,7 @@ class MapController(private val ctx: Context, val map: MapLibreMap) {
         st.addImage("cam", circleBitmap("📷", 0xFF37474F.toInt(), 30))
         st.addImage("pin", pinBitmap(0xFFE53935.toInt()))
         st.addImage("dest", pinBitmap(0xFF1A73E8.toInt(), "🏁"))
+        for (n in 1..9) st.addImage("stop-$n", pinBitmap(0xFFF57C00.toInt(), "$n"))
     }
 
     // ---------- data ----------
@@ -289,6 +291,8 @@ class MapController(private val ctx: Context, val map: MapLibreMap) {
     fun setReports(list: List<Report>) { reports = list; renderReports() }
     fun setCameras(list: List<SpeedCamera>) { cameras = list; renderCameras() }
     fun setPin(p: Place?) { pin = p; renderPin() }
+    /** Numbered pins for the stops on the way. */
+    fun setStops(list: List<LatLon>) { if (list != stops) { stops = list; renderPin() } }
     fun setResults(list: List<Place>) { results = list; renderResults() }
     fun setTraveled(upTo: LatLon?) { traveledTo = upTo; renderTraveled() }
 
@@ -335,10 +339,14 @@ class MapController(private val ctx: Context, val map: MapLibreMap) {
 
     private fun renderPin() {
         val p = pin
-        src(S_PIN)?.setGeoJson(if (p == null) FeatureCollection.fromFeatures(emptyList()) else
-            FeatureCollection.fromFeature(Feature.fromGeometry(Point.fromLngLat(p.lon, p.lat)).apply {
-                addStringProperty("icon", if (routes.isNotEmpty()) "dest" else "pin")
-            }))
+        val features = ArrayList<Feature>()
+        stops.forEachIndexed { i, s ->
+            features += Feature.fromGeometry(Point.fromLngLat(s.lon, s.lat)).apply { addStringProperty("icon", "stop-${(i + 1).coerceAtMost(9)}") }
+        }
+        if (p != null) features += Feature.fromGeometry(Point.fromLngLat(p.lon, p.lat)).apply {
+            addStringProperty("icon", if (routes.isNotEmpty()) "dest" else "pin")
+        }
+        src(S_PIN)?.setGeoJson(FeatureCollection.fromFeatures(features))
     }
 
     private fun renderResults() {
@@ -729,13 +737,14 @@ class MapController(private val ctx: Context, val map: MapLibreMap) {
             close()
         }
         c.drawPath(path, p)
-        if (emoji != null) drawEmoji(c, emoji, w / 2f, r + dp(1), r * 1.1f)
+        if (emoji != null && emoji.all { it.isDigit() }) drawEmoji(c, emoji, w / 2f, r + dp(1), r * 1.15f, 0xFFFFFFFF.toInt(), Typeface.DEFAULT_BOLD)
+        else if (emoji != null) drawEmoji(c, emoji, w / 2f, r + dp(1), r * 1.1f)
         else { p.color = 0xFFFFFFFF.toInt(); c.drawCircle(w / 2f, r + dp(1), r * 0.38f, p) }
         return bmp
     }
 
-    private fun drawEmoji(c: Canvas, s: String, cx: Float, cy: Float, size: Float) {
-        val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = size; textAlign = Paint.Align.CENTER; typeface = Typeface.DEFAULT }
+    private fun drawEmoji(c: Canvas, s: String, cx: Float, cy: Float, size: Float, color: Int = 0xFF000000.toInt(), face: Typeface = Typeface.DEFAULT) {
+        val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = size; textAlign = Paint.Align.CENTER; typeface = face; this.color = color }
         val fm = tp.fontMetrics
         c.drawText(s, cx, cy - (fm.ascent + fm.descent) / 2, tp)
     }

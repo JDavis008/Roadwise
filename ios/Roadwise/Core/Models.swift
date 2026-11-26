@@ -94,12 +94,17 @@ final class Route: Identifiable {
     let ferry: Bool
     let mode: TravelMode
     let destination: Coord
+    /// Stops before the destination, in driving order.
+    let stops: [Waypoint]
+    /// Index into `points` where each stop is reached (same count as `stops`).
+    let stopIndex: [Int]
     /// Speed limit (km/h) for the segment starting at each point, 0 = unknown.
     var limits: [Int]
 
     var distance: Double { cumDist.last ?? 0 }
 
-    init(points: [Coord], maneuvers: [Maneuver], cumTime: [Double], duration: Double, label: String, tolls: Bool, ferry: Bool, mode: TravelMode, destination: Coord) {
+    init(points: [Coord], maneuvers: [Maneuver], cumTime: [Double], duration: Double, label: String, tolls: Bool, ferry: Bool,
+         mode: TravelMode, destination: Coord, stops: [Waypoint] = [], stopIndex: [Int] = []) {
         self.points = points
         self.maneuvers = maneuvers
         self.cumTime = cumTime
@@ -110,7 +115,53 @@ final class Route: Identifiable {
         self.ferry = ferry
         self.mode = mode
         self.destination = destination
+        self.stops = stops
+        self.stopIndex = stopIndex
         self.limits = [Int](repeating: 0, count: points.count)
+    }
+
+    /// The same route with `via` marked on it: where each stop is reached (in order), with an
+    /// "Arrive at …" instruction there so turn-by-turn calls it out. Same as Route.withStops on Android.
+    func withStops(_ via: [Waypoint]) -> Route {
+        guard !via.isEmpty, !points.isEmpty else { return self }
+        var idx: [Int] = []
+        var from = 0
+        for w in via {
+            var best = from, bestD = Double.greatestFiniteMagnitude
+            for i in from..<points.count {
+                let d = Geo.dist(points[i], w.coordinate)
+                if d < bestD { bestD = d; best = i }
+            }
+            idx.append(best)
+            from = best
+        }
+        let arrivals = zip(via, idx).map { w, i in
+            Maneuver(turn: .arrive, text: "Arrive at \(w.name)", spoken: "Arrive at \(w.name), your stop", street: nil, index: i, exit: 0)
+        }
+        // Merge by point index; a stop comes before a turn at the same point.
+        var ms: [Maneuver] = []
+        var a = 0, b = 0
+        while a < arrivals.count || b < maneuvers.count {
+            if b >= maneuvers.count || (a < arrivals.count && arrivals[a].index <= maneuvers[b].index) {
+                ms.append(arrivals[a]); a += 1
+            } else {
+                ms.append(maneuvers[b]); b += 1
+            }
+        }
+        let r = Route(points: points, maneuvers: ms, cumTime: cumTime, duration: duration, label: label, tolls: tolls, ferry: ferry,
+                      mode: mode, destination: destination, stops: via, stopIndex: idx)
+        r.limits = limits
+        return r
+    }
+}
+
+/// A stop on the way to the destination (gas, food, a friend's house…).
+struct Waypoint: Equatable {
+    let coordinate: Coord
+    let name: String
+
+    static func == (a: Waypoint, b: Waypoint) -> Bool {
+        a.name == b.name && abs(a.coordinate.latitude - b.coordinate.latitude) < 1e-6 && abs(a.coordinate.longitude - b.coordinate.longitude) < 1e-6
     }
 }
 

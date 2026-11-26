@@ -46,11 +46,12 @@ class OfflineRouter(
 
     suspend fun route(
         from: LatLon, to: LatLon, mode: TravelMode, s: Settings,
-        heading: Double? = null, avoid: List<LatLon> = emptyList(),
+        heading: Double? = null, avoid: List<LatLon> = emptyList(), via: List<LatLon> = emptyList(),
     ): Route = withContext(Dispatchers.Default) {
         lock.withLock {
             ensureProfiles()
-            val missing = missingSegments(straightLineSamples(from, to))
+            val all = listOf(from) + via + to
+            val missing = missingSegments(all.zipWithNext().flatMap { (a, b) -> straightLineSamples(a, b) })
             if (missing.isNotEmpty()) {
                 throw RoutingException("Offline routing data missing for this trip. Download the area in Offline maps (${missing.joinToString()}).")
             }
@@ -58,7 +59,7 @@ class OfflineRouter(
             rc.localFunction = File(profileDir, "${mode.brouterProfile}.brf").absolutePath
             rc.memoryclass = 256
             val collector = RoutingParamCollector()
-            val wps = collector.getWayPointList("${from.lon},${from.lat}|${to.lon},${to.lat}")
+            val wps = collector.getWayPointList(all.joinToString("|") { "${it.lon},${it.lat}" })
             val params = HashMap<String, String>()
             params["timode"] = "2"
             if (heading != null) params["direction"] = heading.toInt().toString()

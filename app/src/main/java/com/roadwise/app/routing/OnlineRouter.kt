@@ -17,13 +17,16 @@ class OnlineRouter(private val net: Net) {
     suspend fun route(
         from: LatLon, to: LatLon, mode: TravelMode, s: Settings,
         heading: Double? = null, avoid: List<LatLon> = emptyList(), alternates: Int = 2,
+        via: List<LatLon> = emptyList(),
     ): List<Route> {
-        val body = buildRequest(from, to, mode, s, heading, avoid, alternates)
+        // Valhalla only offers alternatives for trips without stops.
+        val alts = if (via.isEmpty()) alternates else 0
+        val body = buildRequest(from, to, mode, s, heading, avoid, alts, via)
         val text = try {
             net.postJson("$BASE/route", body.toString())
         } catch (e: Exception) {
             // A closure point that can't be matched to a road makes Valhalla reject the request.
-            if (avoid.isNotEmpty()) net.postJson("$BASE/route", buildRequest(from, to, mode, s, heading, emptyList(), alternates).toString())
+            if (avoid.isNotEmpty()) net.postJson("$BASE/route", buildRequest(from, to, mode, s, heading, emptyList(), alts, via).toString())
             else throw e
         }
         val json = JSONObject(text)
@@ -59,13 +62,15 @@ class OnlineRouter(private val net: Net) {
 
     private fun buildRequest(
         from: LatLon, to: LatLon, mode: TravelMode, s: Settings,
-        heading: Double?, avoid: List<LatLon>, alternates: Int,
+        heading: Double?, avoid: List<LatLon>, alternates: Int, via: List<LatLon> = emptyList(),
     ) = JSONObject().apply {
         put("locations", JSONArray().apply {
             put(JSONObject().apply {
                 put("lat", from.lat); put("lon", from.lon)
                 if (heading != null) { put("heading", heading.toInt()); put("heading_tolerance", 60) }
             })
+            // Each stop ends a leg ("break"), so the route really goes there.
+            via.forEach { v -> put(JSONObject().apply { put("lat", v.lat); put("lon", v.lon); put("type", "break") }) }
             put(JSONObject().apply { put("lat", to.lat); put("lon", to.lon) })
         })
         put("costing", mode.valhalla)

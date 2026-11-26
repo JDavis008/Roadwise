@@ -125,6 +125,11 @@ class RoadwiseSession : Session(), DefaultLifecycleObserver {
         val b = Trip.Builder()
         val est = CarFormat.estimate(s.remainingM, s.remainingS, s.etaMillis, c.prefs.current.imperial)
         s.next?.let { m -> b.addStep(CarFormat.step(m, c.prefs.current.imperial), CarFormat.estimate(s.distToNextM, 0.0, s.etaMillis, c.prefs.current.imperial)) }
+        // The next stop comes first, so the car shows the time to it (like Google Maps).
+        s.stops.firstOrNull()?.let { stop ->
+            b.addDestination(Destination.Builder().setName(stop.name).setAddress("Stop").build(),
+                CarFormat.estimate(s.stopDistM, s.stopTimeS, s.stopEtaMillis, c.prefs.current.imperial))
+        }
         b.addDestination(Destination.Builder().setName(s.destination?.name ?: "Destination").setAddress(s.destination?.address ?: "").build(), est)
         s.currentStreet?.let { b.setCurrentRoad(it) }
         b.setLoading(s.rerouting)

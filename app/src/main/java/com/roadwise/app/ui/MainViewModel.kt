@@ -20,6 +20,7 @@ import com.roadwise.app.offline.AreaEstimate
 import com.roadwise.app.reports.ReportType
 import com.roadwise.app.routing.Route
 import com.roadwise.app.routing.TravelMode
+import com.roadwise.app.routing.Waypoint
 import com.roadwise.app.search.Category
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,6 +37,8 @@ sealed interface Sheet {
     data class Routes(
         val dest: Place, val routes: List<Route> = emptyList(), val selected: Int = 0,
         val loading: Boolean = true, val error: String? = null, val mode: TravelMode = TravelMode.DRIVE,
+        /** Stops on the way, in order. */
+        val stops: List<Place> = emptyList(),
     ) : Sheet
     data class ReportInfo(val report: Report) : Sheet
 }
@@ -62,6 +65,8 @@ data class UiState(
     val recents: List<Place> = emptyList(),
     val zoom: Double = 4.0,
     val offlinePromptHidden: Boolean = false,
+    /** Search is picking a stop for the planned route (or the drive) instead of a destination. */
+    val addingStop: Boolean = false,
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -125,6 +130,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     lastRouteVersion = s.routeVersion
                     m.setRoutes(listOf(s.route), 0)
                 }
+                m.setStops(if (s.active) s.stops.map { it.point } else emptyList())
                 if (s.active) m.setTraveled(s.snapped)
                 m.setNavProgress(if (s.active && !s.arrived) s.route else null, s.progressM, s.speedMps, !s.offRoute && s.snapped != null)
             }
@@ -163,7 +169,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (s.active && s.route != null) {
             lastRouteVersion = s.routeVersion
             m.setRoutes(listOf(s.route), 0); m.setPin(s.destination); m.setNavMode(true, settings.value.tilt3d)
-        } else (ui.value.sheet as? Sheet.Routes)?.let { m.setRoutes(it.routes, it.selected); m.setPin(it.dest) }
+            m.setStops(s.stops.map { it.point })
+        } else (ui.value.sheet as? Sheet.Routes)?.let { m.setRoutes(it.routes, it.selected); m.setPin(it.dest); m.setStops(it.stops.map { p -> p.latLon }) }
     }
 
     fun detachMap() { map?.dispose(); map = null }
@@ -208,7 +215,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------- navigation between screens ----------------
     fun openScreen(s: Screen) {
-        _ui.update { it.copy(screen = s) }
+        _ui.update { it.copy(screen = s, addingStop = it.addingStop && s == Screen.SEARCH) }
         if (s == Screen.SEARCH) refreshLists()
         if (s == Screen.OFFLINE) c.offlineAreas.refresh()
     }
@@ -216,7 +223,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun back(): Boolean {
         val u = _ui.value
         when {
-            u.screen != Screen.MAP -> _ui.update { it.copy(screen = Screen.MAP) }
+            u.screen != Screen.MAP -> _ui.update { it.copy(screen = Screen.MAP, addingStop = false) }
             u.reportPicker -> _ui.update { it.copy(reportPicker = false) }
             u.shareDialog -> _ui.update { it.copy(shareDialog = false) }
             u.layersSheet -> _ui.update { it.copy(layersSheet = false) }
@@ -284,6 +291,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------- places ----------------
     fun selectPlace(p: Place, fly: Boolean = true) {
         viewModelScope.launch(Dispatchers.IO) { c.db.addRecent(p) }
+        if (_ui.value.addingStop) { addStop(p); return }
         _ui.update { it.copy(screen = Screen.MAP, sheet = Sheet.PlaceInfo(p), reportPicker = false) }
         map?.setRoutes(emptyList(), 0)
         map?.setPin(p)
@@ -332,6 +340,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (!nav.value.active) {
             map?.setRoutes(emptyList(), 0)
             map?.setPin(null)
+            map?.setStops(emptyList())
         }
     }
 
@@ -345,17 +354,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun clearRecents() = viewModelScope.launch(Dispatchers.IO) { c.db.clearRecents(); refreshLists() }
 
     // ---------------- routing ----------------
-    fun directions(dest: Place, mode: TravelMode = (ui.value.sheet as? Sheet.Routes)?.mode ?: TravelMode.DRIVE) {
+    fun directions(
+        dest: Place,
+        mode: TravelMode = (ui.value.sheet as? Sheet.Routes)?.mode ?: TravelMode.DRIVE,
+        // Keep the stops when only the mode or options change; a new destination starts fresh.
+        stops: List<Place> = (ui.value.sheet as? Sheet.Routes)?.takeIf { it.dest == dest }?.stops ?: emptyList(),
+    ) {
         val from = here
         if (from == null) { toast("Waiting for GPS location..."); return }
-        _ui.update { it.copy(screen = Screen.MAP, sheet = Sheet.Routes(dest, mode = mode)) }
+        _ui.update { it.copy(screen = Screen.MAP, sheet = Sheet.Routes(dest, mode = mode, stops = stops), addingStop = false) }
         map?.setResults(emptyList())
         map?.setPin(dest)
+        map?.setStops(stops.map { it.latLon })
         viewModelScope.launch {
             try {
-                val routes = c.routing.routes(from, dest.latLon, mode, avoid = c.nav.closures())
+                val routes = c.routing.routes(from, dest.latLon, mode, avoid = c.nav.closures(),
+                    via = stops.map { Waypoint(it.latLon, it.name) })
                 val cur = _ui.value.sheet
-                if (cur is Sheet.Routes && cur.dest == dest) {
+                if (cur is Sheet.Routes && cur.dest == dest && cur.stops == stops) {
                     _ui.update { it.copy(sheet = cur.copy(routes = routes, selected = 0, loading = false, error = null)) }
                     map?.setRoutes(routes, 0)
                     map?.setPin(dest)
@@ -367,10 +383,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 val cur = _ui.value.sheet
-                if (cur is Sheet.Routes && cur.dest == dest) _ui.update { it.copy(sheet = cur.copy(loading = false, error = e.message ?: "Routing failed")) }
+                if (cur is Sheet.Routes && cur.dest == dest && cur.stops == stops) _ui.update { it.copy(sheet = cur.copy(loading = false, error = e.message ?: "Routing failed")) }
             }
         }
     }
+
+    // ---------------- stops ----------------
+    /** Opens search to pick a stop: for the planned route, or the drive in progress. */
+    fun beginAddStop() {
+        searchJob?.cancel()
+        _ui.update { it.copy(screen = Screen.SEARCH, addingStop = true, query = "", category = null, results = emptyList(), searching = false) }
+        map?.setResults(emptyList())
+    }
+
+    private fun addStop(p: Place) {
+        _ui.update { it.copy(addingStop = false, screen = Screen.MAP, query = "", category = null, results = emptyList()) }
+        map?.setResults(emptyList())
+        if (nav.value.active) {
+            c.nav.addStop(Waypoint(p.latLon, p.name))
+            toast("Adding ${p.name} as a stop...")
+            return
+        }
+        val s = _ui.value.sheet as? Sheet.Routes ?: return
+        if (s.stops.size >= MAX_STOPS) { toast("Up to $MAX_STOPS stops"); return }
+        directions(s.dest, s.mode, s.stops + p)
+    }
+
+    fun removeRouteStop(i: Int) {
+        val s = _ui.value.sheet as? Sheet.Routes ?: return
+        directions(s.dest, s.mode, s.stops.filterIndexed { k, _ -> k != i })
+    }
+
+    fun skipNextStop() = c.nav.removeStop(0)
 
     fun selectRoute(i: Int) {
         val s = _ui.value.sheet as? Sheet.Routes ?: return
@@ -401,6 +445,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun navigateHomeOrWork(kind: String) {
         val p = _ui.value.saved.firstOrNull { it.kind == kind }?.place
         if (p == null) { toast("Set your ${kind.replaceFirstChar { it.uppercase() }} from any place's Save button"); openScreen(Screen.SEARCH); return }
+        if (_ui.value.addingStop) { addStop(p); return }
         directions(p)
     }
 
@@ -593,4 +638,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun testServer(url: String) = c.reports.testServer(url)
 
     fun distanceTo(p: LatLon): Double? = here?.let { Geo.dist(it, p) }
+
+    companion object { const val MAX_STOPS = 5 }
 }

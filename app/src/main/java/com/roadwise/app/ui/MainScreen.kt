@@ -141,7 +141,9 @@ fun rememberVoiceSearch(onResult: (String) -> Unit): () -> Unit {
 private fun BrowseOverlay(vm: MainViewModel, ui: UiState, online: Boolean) {
     // Offline-download prompt shown in the bottom card (until dismissed or something is downloaded).
     val areas by vm.areas.collectAsStateWithLifecycle()
-    val promptState = remember(areas.isEmpty()) { if (areas.isEmpty()) vm.myState() else null }
+    // Look again once the first GPS fix arrives (a fresh install starts from the middle of the US).
+    val hasFix = vm.c.location.location.collectAsStateWithLifecycle().value != null
+    val promptState = remember(areas.isEmpty(), hasFix) { if (areas.isEmpty()) vm.myState() else null }
         ?.takeIf { !ui.offlinePromptHidden }
     val fabBottom = if (promptState != null) 240.dp else 150.dp
     val voice = rememberVoiceSearch { vm.openScreen(Screen.SEARCH); vm.setQuery(it) }

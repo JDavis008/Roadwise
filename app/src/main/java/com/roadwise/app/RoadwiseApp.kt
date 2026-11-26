@@ -81,8 +81,11 @@ class Container(val app: Application) {
             location.acquire("nav-fallback", 1000)
             usingFallback = true
         }
-        if (simulate) simulator.start(route)
+        if (simulate) { simRoute = route; simulator.start(route) }
     }
+
+    /** The route the preview drive is following; it switches when stops are added or skipped. */
+    private var simRoute: com.roadwise.app.routing.Route? = null
 
     fun endNavigation() {
         simulator.stop()
@@ -95,6 +98,13 @@ class Container(val app: Application) {
     }
 
     fun start() {
+        scope.launch {
+            nav.state.collect { s ->
+                val r = s.route
+                if (simulator.running.value && r != null && simRoute != null && r !== simRoute) { simRoute = r; simulator.start(r) }
+                if (!s.active) simRoute = null
+            }
+        }
         scope.launch {
             reports.reload()
             offlineAreas.refresh()

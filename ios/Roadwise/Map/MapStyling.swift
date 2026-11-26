@@ -125,7 +125,28 @@ final class ReportAnnotation: MLNPointAnnotation {
     var report: Report?
 }
 
+/// A stop on the way, drawn as an orange numbered circle.
+final class StopAnnotation: MLNPointAnnotation {
+    var number = 1
+}
+
 extension MLNAnnotationView {
+    static func stop(_ annotation: StopAnnotation) -> MLNAnnotationView {
+        let v = MLNAnnotationView(annotation: annotation, reuseIdentifier: nil)
+        v.frame = CGRect(x: 0, y: 0, width: 30, height: 30)
+        v.backgroundColor = .systemOrange
+        v.layer.cornerRadius = 15
+        v.layer.borderColor = UIColor.white.cgColor
+        v.layer.borderWidth = 2
+        let label = UILabel(frame: v.bounds)
+        label.text = "\(annotation.number)"
+        label.textAlignment = .center
+        label.textColor = .white
+        label.font = .boldSystemFont(ofSize: 15)
+        v.addSubview(label)
+        return v
+    }
+
     static func puck(_ annotation: MLNAnnotation) -> MLNAnnotationView {
         let v = MLNAnnotationView(annotation: annotation, reuseIdentifier: "puck")
         v.frame = CGRect(x: 0, y: 0, width: 44, height: 44)

@@ -46,6 +46,20 @@ final class OfflineTests: XCTestCase {
         XCTAssertLessThan(Geo.dist(r.points.last!, to), 300)
     }
 
+    func testRouteWithAStopOffline() async throws {
+        let from = Coord(latitude: 41.977, longitude: -91.668), to = Coord(latitude: 42.005, longitude: -91.645)
+        let stop = Waypoint(coordinate: Coord(latitude: 41.985, longitude: -91.66), name: "Coffee stop")
+        let direct = try XCTUnwrap(try await RoutingService.offlineRoutes(from: from, to: to, mode: .drive, options: RouteOptions(), data: Self.data).first)
+        let r = try XCTUnwrap(try await RoutingService.offlineRoutes(from: from, to: to, mode: .drive, options: RouteOptions(), via: [stop], data: Self.data).first)
+        XCTAssertEqual(r.stops, [stop])
+        XCTAssertEqual(r.stopIndex.count, 1)
+        XCTAssertLessThan(Geo.dist(r.points[r.stopIndex[0]], stop.coordinate), 150, "the route should go to the stop")
+        XCTAssertEqual(r.maneuvers.filter { $0.text == "Arrive at Coffee stop" }.count, 1)
+        XCTAssertEqual(r.maneuvers.last?.turn, .arrive)
+        XCTAssertGreaterThanOrEqual(r.distance, direct.distance - 1)
+        XCTAssertLessThan(Geo.dist(r.points.last!, to), 300)
+    }
+
     func testWalkingAndBikeRoutesWorkOffline() async throws {
         let from = Coord(latitude: 41.977, longitude: -91.668), to = Coord(latitude: 41.985, longitude: -91.66)
         for mode in [TravelMode.walk, .bike] {

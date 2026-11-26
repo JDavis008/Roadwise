@@ -49,6 +49,8 @@ fun NavHud(vm: MainViewModel, s: NavState, ui: UiState) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val simulating by vm.simulating.collectAsStateWithLifecycle()
     val imperial = settings.imperial
+    // The trip card grows by a row when a stop is next; keep the buttons above it.
+    val barSpace = if (s.stops.isNotEmpty() && !s.arrived) 186.dp else 120.dp
     Box(Modifier.fillMaxSize().systemBarsPadding()) {
         // ---------- top: maneuver banner ----------
         Column(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(10.dp)) {
@@ -91,14 +93,14 @@ fun NavHud(vm: MainViewModel, s: NavState, ui: UiState) {
         }
 
         // ---------- left: speedometer + limit ----------
-        Column(Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 120.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        Column(Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = barSpace), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (s.speedLimitKmh > 0) LimitSign(Units.limitFromKmh(s.speedLimitKmh, imperial), imperial)
             SpeedBadge(speedLabel(s.speedMps, imperial), Units.speedUnit(imperial), s.overspeed)
         }
 
         // ---------- right: controls ----------
-        Column(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = barSpace), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             SmallFloatingActionButton(onClick = { vm.updateSettings { it.copy(voice = !it.voice) } }, containerColor = MaterialTheme.colorScheme.surface) {
                 Icon(if (settings.voice) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff, "Voice")
             }
@@ -111,13 +113,16 @@ fun NavHud(vm: MainViewModel, s: NavState, ui: UiState) {
             SmallFloatingActionButton(onClick = { vm.overview() }, containerColor = MaterialTheme.colorScheme.surface) {
                 Icon(Icons.Filled.Route, "Route overview")
             }
+            if (s.stops.size < MainViewModel.MAX_STOPS) SmallFloatingActionButton(onClick = { vm.beginAddStop() }, containerColor = MaterialTheme.colorScheme.surface) {
+                Icon(Icons.Filled.AddLocationAlt, "Add a stop")
+            }
             FloatingActionButton(onClick = { vm.openReportPicker(true) }, containerColor = RwColors.Orange, contentColor = Color.White, shape = CircleShape) {
                 Icon(Icons.Filled.Campaign, "Report")
             }
         }
 
         if (!ui.following) {
-            ExtendedFloatingActionButton(onClick = { vm.recenter() }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 110.dp),
+            ExtendedFloatingActionButton(onClick = { vm.recenter() }, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = barSpace - 10.dp),
                 icon = { Icon(Icons.Filled.Navigation, null) }, text = { Text("Re-center") })
         }
 
@@ -133,7 +138,24 @@ fun NavHud(vm: MainViewModel, s: NavState, ui: UiState) {
                     }
                     Button(onClick = { vm.endNavigation() }) { Text("Done") }
                 }
-            } else {
+            } else Column {
+                s.stops.firstOrNull()?.let { stop ->
+                    // Next stop: name, how far, when, and a way to skip it.
+                    Row(Modifier.fillMaxWidth().background(RwColors.Orange.copy(alpha = 0.12f)).padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = CircleShape, color = RwColors.Orange, contentColor = Color.White, modifier = Modifier.size(22.dp)) {
+                            Box(contentAlignment = Alignment.Center) { Text("1", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(stop.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${Units.distance(s.stopDistM, imperial)} · ${Units.duration(s.stopTimeS)} · ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(s.stopEtaMillis))}" +
+                                if (s.stops.size > 1) " · ${s.stops.size - 1} more" else "",
+                                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        TextButton(onClick = { vm.skipNextStop() }) { Text("Skip") }
+                    }
+                }
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { vm.endNavigation() }, modifier = Modifier.size(48.dp).background(RwColors.Red.copy(alpha = 0.12f), CircleShape)) {
                         Icon(Icons.Filled.Close, "End navigation", tint = RwColors.Red)

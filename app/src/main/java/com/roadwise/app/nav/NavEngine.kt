@@ -18,6 +18,7 @@ import com.roadwise.app.routing.Route
 import com.roadwise.app.routing.RouteService
 import com.roadwise.app.routing.Turn
 import com.roadwise.app.routing.TravelMode
+import com.roadwise.app.routing.Waypoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -53,6 +54,11 @@ data class NavState(
     val snapped: LatLon? = null,
     val bearing: Double = 0.0,
     val routeVersion: Int = 0,
+    /** Stops still ahead, in order. */
+    val stops: List<Waypoint> = emptyList(),
+    val stopDistM: Double = 0.0,
+    val stopTimeS: Double = 0.0,
+    val stopEtaMillis: Long = 0,
 )
 
 /**
@@ -85,20 +91,31 @@ class NavEngine(
     private var mode = TravelMode.DRIVE
     private var dest: Place? = null
     private var version = 0
+    /** How many of the current route's stops are behind us. */
+    private var stopsDone = 0
+    /** The stop we last reached: GPS wandering around its parking lot isn't "off route". */
+    private var atStop: LatLon? = null
+    private var lastLoc: Location? = null
 
     fun start(r: Route, destination: Place) {
         route = r; dest = destination; mode = r.mode
         resetProgress()
+        stopsDone = 0; atStop = null
         version++
         _state.value = NavState(active = true, route = r, destination = destination, routeVersion = version,
             remainingM = r.distanceM, remainingS = r.durationS, etaMillis = System.currentTimeMillis() + (r.durationS * 1000).toLong(),
-            next = r.maneuvers.getOrNull(1), nextIndex = 1)
+            next = r.maneuvers.getOrNull(1), nextIndex = 1, stops = r.stops)
         rebuildHazards()
         scope.launch { routes.enrich(r) }
         val first = r.maneuvers.firstOrNull()
         val units = prefs.current.imperial
         voice.speak(buildString {
-            append("Starting route to ${destination.name}. ")
+            append("Starting route to ${destination.name}")
+            when (r.stops.size) {
+                0 -> append(". ")
+                1 -> append(", stopping at ${r.stops[0].name}. ")
+                else -> append(" with ${r.stops.size} stops. ")
+            }
             append(Units.spokenDistance(r.distanceM, units)).append(", about ").append(Units.duration(r.durationS).replace("hr", "hours").replace("min", "minutes")).append(". ")
             if (first != null && first.turn == Turn.DEPART) append(first.spoken)
         }, interrupt = true)
@@ -107,6 +124,7 @@ class NavEngine(
 
     fun stop() {
         route = null
+        stopsDone = 0; atStop = null; lastLoc = null
         rerouteJob?.cancel()
         voice.stop()
         _state.value = NavState()
@@ -147,8 +165,14 @@ class NavEngine(
     fun onLocation(loc: Location) {
         val r = route ?: return
         if (_state.value.arrived) return
+        lastLoc = loc
         val p = LatLon(loc.latitude, loc.longitude)
         val pts = r.points
+
+        // Pulling into a stop (gas station, drive-through) can leave the road, so count it as
+        // reached once we're close, and don't call that "off route" while we're there.
+        if (stopsDone < r.stops.size && Geo.dist(p, r.stops[stopsDone].point) < 45) reachStop(r)
+        atStop?.let { if (Geo.dist(p, it) > 90) atStop = null }
 
         // --- snap to route (search a window ahead of the last known segment) ---
         var bestI = segIndex; var bestT = 0.0; var bestD = Double.MAX_VALUE
@@ -165,6 +189,11 @@ class NavEngine(
         }
         val offDist = Geo.projectOnSegment(p, pts[bestI], pts[bestI + 1]).second
         val threshold = maxOf(if (mode == TravelMode.DRIVE) 45.0 else 30.0, loc.accuracy * 1.3)
+        if (offDist > threshold && atStop != null) {
+            offCount = 0
+            _state.value = _state.value.copy(offRoute = false, speedMps = loc.speed.toDouble(), snapped = p)
+            return
+        }
         if (offDist > threshold) {
             offCount++
             if (offCount >= 3) triggerReroute(loc)
@@ -176,10 +205,17 @@ class NavEngine(
         val progress = r.cumDist[bestI] + bestT * (r.cumDist[bestI + 1] - r.cumDist[bestI])
         val snapped = Geo.interpolate(pts[bestI], pts[bestI + 1], bestT)
         val remaining = (r.distanceM - progress).coerceAtLeast(0.0)
-        val remainingS = (r.cumTime.last() - r.timeAt(bestI, bestT)).coerceAtLeast(0.0)
+        val timeNow = r.timeAt(bestI, bestT)
+        val remainingS = (r.cumTime.last() - timeNow).coerceAtLeast(0.0)
 
-        // --- next maneuver ---
-        var ni = r.maneuvers.indexOfFirst { r.cumDist[it.pointIndex] > progress + 8 }
+        // --- stops ---
+        while (stopsDone < r.stops.size && progress >= r.cumDist[r.stopIndex[stopsDone]] - 20) reachStop(r)
+        val reachedAt = r.stopIndex.take(stopsDone).toSet()
+
+        // --- next maneuver (skipping the arrivals at stops already reached) ---
+        var ni = r.maneuvers.indexOfFirst { m ->
+            r.cumDist[m.pointIndex] > progress + 8 && !(m.turn == Turn.ARRIVE && m.pointIndex in reachedAt && m !== r.maneuvers.last())
+        }
         if (ni < 0) ni = r.maneuvers.size - 1
         val next = r.maneuvers[ni]
         val distToNext = (r.cumDist[next.pointIndex] - progress).coerceAtLeast(0.0)
@@ -199,8 +235,13 @@ class NavEngine(
         announce(r, ni, next, distToNext, speed, then)
         val alert = checkAlerts(progress, speed)
         val over = checkSpeed(speed, limit)
+        val nextStopAt = r.stopIndex.getOrNull(stopsDone)
+        val stopDist = nextStopAt?.let { (r.cumDist[it] - progress).coerceAtLeast(0.0) } ?: 0.0
+        val stopTime = nextStopAt?.let { (r.cumTime[it] - timeNow).coerceAtLeast(0.0) } ?: 0.0
 
         _state.value = _state.value.copy(
+            stops = r.stops.drop(stopsDone), stopDistM = stopDist, stopTimeS = stopTime,
+            stopEtaMillis = System.currentTimeMillis() + (stopTime * 1000).toLong(),
             progressM = progress, remainingM = remaining, remainingS = remainingS,
             etaMillis = System.currentTimeMillis() + (remainingS * 1000).toLong(),
             next = next, nextIndex = ni, distToNextM = distToNext, then = then,
@@ -288,26 +329,76 @@ class NavEngine(
         val now = System.currentTimeMillis()
         if (rerouteJob?.isActive == true || now - lastReroute < 12_000) return
         lastReroute = now
-        val destination = dest ?: return
-        _state.value = _state.value.copy(rerouting = true)
         voice.speak("Rerouting", interrupt = true)
+        reroute(loc, r.stops.drop(stopsDone), null)
+    }
+
+    /** Plans a new route from [loc] through [via] to the destination and switches to it. */
+    private fun reroute(loc: Location?, via: List<Waypoint>, done: String?) {
+        val r = route ?: return
+        val from = loc?.let { LatLon(it.latitude, it.longitude) } ?: _state.value.snapped ?: r.points.first()
+        rerouteJob?.cancel()
+        _state.value = _state.value.copy(rerouting = true)
         rerouteJob = scope.launch {
             try {
-                val heading = if (loc.hasBearing() && loc.speed > 2) loc.bearing.toDouble() else null
-                val result = routes.routes(LatLon(loc.latitude, loc.longitude), r.destination, mode, heading, closures(), alternates = false)
+                val heading = if (loc != null && loc.hasBearing() && loc.speed > 2) loc.bearing.toDouble() else null
+                val result = routes.routes(from, r.destination, mode, heading, closures(), alternates = false, via = via)
                 val nr = result.first()
                 route = nr
                 resetProgress()
+                stopsDone = 0
                 version++
                 _state.value = _state.value.copy(route = nr, rerouting = false, offRoute = false, routeVersion = version,
-                    message = if (nr.source == "offline") "Offline route (no live traffic)" else null)
+                    stops = nr.stops, message = done ?: if (nr.source == "offline") "Offline route (no live traffic)" else null)
+                done?.let { voice.speak(it, interrupt = true) }
                 rebuildHazards()
                 routes.enrich(nr)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w("NavEngine", "reroute failed", e)
                 _state.value = _state.value.copy(rerouting = false, message = "Couldn't reroute: ${e.message}")
             }
         }
+    }
+
+    private fun reachStop(r: Route) {
+        val k = stopsDone
+        val w = r.stops[k]
+        stopsDone++
+        atStop = w.point
+        // Don't announce the stop again if "Arrive at ..." was just spoken.
+        val mi = r.maneuvers.indexOfFirst { it.turn == Turn.ARRIVE && it.pointIndex == r.stopIndex[k] }
+        val alreadySaid = mi >= 0 && (spoken[mi] ?: -1) >= 2
+        if (mi >= 0) spoken[mi] = 2
+        val next = r.stops.getOrNull(stopsDone)?.name ?: dest?.name ?: "your destination"
+        if (!alreadySaid) voice.speak("You've reached ${w.name}", interrupt = true)
+        _state.value = _state.value.copy(stops = r.stops.drop(stopsDone), message = "Reached ${w.name} · next: $next")
+    }
+
+    /** Adds a stop in driving order (before any stop that comes later along the route) and reroutes. */
+    fun addStop(w: Waypoint) {
+        val r = route ?: return
+        val remaining = r.stops.drop(stopsDone).toMutableList()
+        val at = nearestIndex(r, w.point)
+        val pos = remaining.indices.firstOrNull { r.stopIndex[stopsDone + it] > at } ?: remaining.size
+        remaining.add(pos, w)
+        reroute(lastLoc, remaining, "Added stop: ${w.name}")
+    }
+
+    /** Drops a stop still ahead (0 = the next one) and reroutes. */
+    fun removeStop(i: Int = 0) {
+        val r = route ?: return
+        val remaining = r.stops.drop(stopsDone).toMutableList()
+        val gone = remaining.getOrNull(i) ?: return
+        remaining.removeAt(i)
+        reroute(lastLoc, remaining, "Skipping ${gone.name}")
+    }
+
+    private fun nearestIndex(r: Route, p: LatLon): Int {
+        var best = 0; var bestD = Double.MAX_VALUE
+        for (i in r.points.indices) { val d = Geo.dist(r.points[i], p); if (d < bestD) { bestD = d; best = i } }
+        return best
     }
 
     /** Active road-closure reports, used to route around them (Waze-style). */
@@ -322,8 +413,9 @@ class NavEngine(
         if (route == null) return
         route = r
         resetProgress()
+        stopsDone = 0
         version++
-        _state.value = _state.value.copy(route = r, routeVersion = version)
+        _state.value = _state.value.copy(route = r, routeVersion = version, stops = r.stops)
         rebuildHazards()
         scope.launch { routes.enrich(r) }
     }

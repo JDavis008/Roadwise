@@ -24,6 +24,13 @@ struct NavState {
     var rerouting = false
     var arrived = false
     var alert: NavAlert?
+    /// Stops still ahead, in order, and the distance, time and arrival time to the next one.
+    var stops: [Waypoint] = []
+    var stopDist: Double = 0
+    var stopTime: Double = 0
+    var stopEta = Date()
+    /// A short note under the banner ("Reached Speedway · next: Ohio Stadium").
+    var message: String?
 }
 
 /// Turn-by-turn engine: snaps GPS to the route, tracks progress, speaks instructions,
@@ -52,6 +59,11 @@ final class NavEngine: ObservableObject {
     private var lastChime = Date.distantPast
     var onArrive: (() -> Void)?
     var onReroute: ((Route) -> Void)?
+    /// How many of the current route's stops are behind us.
+    private var stopsDone = 0
+    /// The stop we last reached: GPS wandering around its parking lot isn't "off route".
+    private var atStop: Coord?
+    private var lastFix: Fix?
 
     init(route: Route, destination: Place, settings: AppSettings, voice: Voice, reports: ReportService) {
         self.route = route
@@ -63,11 +75,13 @@ final class NavEngine: ObservableObject {
         state.remainingTime = route.duration
         state.eta = Date().addingTimeInterval(route.duration)
         state.next = route.maneuvers.count > 1 ? route.maneuvers[1] : route.maneuvers.first
+        state.stops = route.stops
         rebuildHazards()
         loadLimits()
         loadCameras()
         let first = route.maneuvers.first
-        voice.speak("Starting route to \(destination.name). \(Units.spoken(route.distance, imperial: settings.imperial)), about "
+        let stopsText = route.stops.isEmpty ? "" : route.stops.count == 1 ? ", stopping at \(route.stops[0].name)" : " with \(route.stops.count) stops"
+        voice.speak("Starting route to \(destination.name)\(stopsText). \(Units.spoken(route.distance, imperial: settings.imperial)), about "
                     + Units.duration(route.duration).replacingOccurrences(of: "hr", with: "hours").replacingOccurrences(of: "min", with: "minutes")
                     + ". " + (first?.turn == .depart ? first!.spoken : ""), interrupt: true)
     }
@@ -114,6 +128,12 @@ final class NavEngine: ObservableObject {
     func onFix(_ f: Fix) {
         let r = route, pts = r.points
         guard !state.arrived, !state.rerouting, pts.count > 1 else { return }
+        lastFix = f
+
+        // Pulling into a stop (gas station, drive-through) can leave the road, so count it as
+        // reached once we're close, and don't call that "off route" while we're there.
+        if stopsDone < r.stops.count && Geo.dist(f.coordinate, r.stops[stopsDone].coordinate) < 45 { reachStop() }
+        if let s = atStop, Geo.dist(f.coordinate, s) > 90 { atStop = nil }
 
         // Snap to the route, searching a window ahead of the last known segment.
         var bi = seg, bt = 0.0, bd = Double.greatestFiniteMagnitude
@@ -125,6 +145,11 @@ final class NavEngine: ObservableObject {
         }
         let offDist = Geo.project(f.coordinate, pts[bi], pts[bi + 1]).d
         let threshold = max(r.mode == .drive ? 45 : 30, f.accuracy * 1.3)
+        if offDist > threshold && atStop != nil {
+            offCount = 0
+            state.offRoute = false
+            return
+        }
         if offDist > threshold {
             offCount += 1
             state.offRoute = offCount >= 3
@@ -143,7 +168,21 @@ final class NavEngine: ObservableObject {
         state.remainingTime = max(0, total - timeAt) * (r.duration / total)
         state.eta = Date().addingTimeInterval(state.remainingTime)
 
-        var ni = r.maneuvers.firstIndex { r.cumDist[$0.index] > progress + 8 } ?? (r.maneuvers.count - 1)
+        // Stops: passed, and how far to the next one.
+        while stopsDone < r.stops.count && progress >= r.cumDist[r.stopIndex[stopsDone]] - 20 { reachStop() }
+        if stopsDone < r.stopIndex.count {
+            let at = r.stopIndex[stopsDone]
+            state.stopDist = max(0, r.cumDist[at] - progress)
+            state.stopTime = max(0, r.cumTime[at] - timeAt) * (r.duration / total)
+            state.stopEta = Date().addingTimeInterval(state.stopTime)
+        }
+        let reachedAt = Set(r.stopIndex.prefix(stopsDone))
+        let lastIndex = r.maneuvers.count - 1
+
+        var ni = r.maneuvers.indices.first { i in
+            let m = r.maneuvers[i]
+            return r.cumDist[m.index] > progress + 8 && !(m.turn == .arrive && reachedAt.contains(m.index) && i != lastIndex)
+        } ?? lastIndex
         ni = max(0, ni)
         let next = r.maneuvers[ni]
         state.next = next
@@ -255,27 +294,77 @@ final class NavEngine: ObservableObject {
     private func reroute(from f: Fix) {
         guard !state.rerouting, Date().timeIntervalSince(lastReroute) > 12 else { return }
         lastReroute = Date()
-        state.rerouting = true
         voice.speak("Rerouting", interrupt: true)
+        replan(from: f.coordinate, heading: f.speed > 2 ? f.heading : nil, via: Array(route.stops.dropFirst(stopsDone)), done: nil)
+    }
+
+    /// Plans a new route from `from` through `via` to the destination and switches to it.
+    private func replan(from: Coord, heading: Double?, via: [Waypoint], done: String?) {
+        guard !state.rerouting else { return }
+        state.rerouting = true
         let mode = route.mode, dest = route.destination
         Task {
             defer { state.rerouting = false; state.offRoute = false }
             do {
-                let avoid = mode == .drive ? reports.closures(between: f.coordinate, and: dest) : []
-                let rs = try await RoutingService.routes(from: f.coordinate, to: dest, mode: mode, options: settings.routeOptions,
-                                                         heading: f.speed > 2 ? f.heading : nil, avoid: avoid, alternates: false)
+                let avoid = mode == .drive ? reports.closures(between: from, and: dest) : []
+                let rs = try await RoutingService.routes(from: from, to: dest, mode: mode, options: settings.routeOptions,
+                                                         heading: heading, avoid: avoid, alternates: false, via: via)
                 guard let nr = rs.first else { return }
                 route = nr
                 resetProgress()
+                stopsDone = 0
+                state.stops = nr.stops
+                state.message = done
+                if let done { voice.speak(done, interrupt: true) }
                 rebuildHazards()
                 loadLimits()
                 loadCameras()
                 onReroute?(nr)
             } catch {
                 voice.speak("Couldn't reroute")
+                state.message = "Couldn't reroute: \(error.localizedDescription)"
             }
         }
     }
+
+    private func reachStop() {
+        let r = route, k = stopsDone
+        guard k < r.stops.count else { return }
+        let w = r.stops[k]
+        stopsDone += 1
+        atStop = w.coordinate
+        // Don't announce the stop again if "Arrive at …" was just spoken.
+        let mi = r.maneuvers.firstIndex { $0.turn == .arrive && $0.index == r.stopIndex[k] }
+        let alreadySaid = mi.map { (spoken[$0] ?? -1) >= 2 } ?? false
+        if let mi { spoken[mi] = 2 }
+        if !alreadySaid { voice.speak("You've reached \(w.name)", interrupt: true) }
+        let next = stopsDone < r.stops.count ? r.stops[stopsDone].name : destination.name
+        state.stops = Array(r.stops.dropFirst(stopsDone))
+        state.message = "Reached \(w.name) · next: \(next)"
+    }
+
+    /// Adds a stop in driving order (before any stop that comes later along the route) and replans.
+    func addStop(_ w: Waypoint) {
+        let r = route
+        var remaining = Array(r.stops.dropFirst(stopsDone))
+        var at = 0, bestD = Double.greatestFiniteMagnitude
+        for (i, p) in r.points.enumerated() { let d = Geo.dist(p, w.coordinate); if d < bestD { bestD = d; at = i } }
+        let pos = remaining.indices.first { r.stopIndex[stopsDone + $0] > at } ?? remaining.count
+        remaining.insert(w, at: pos)
+        replan(from: lastFix?.coordinate ?? state.snapped ?? r.points[0], heading: (lastFix?.speed ?? 0) > 2 ? lastFix?.heading : nil,
+               via: remaining, done: "Added stop: \(w.name)")
+    }
+
+    /// Drops a stop still ahead (0 = the next one) and replans.
+    func removeStop(_ i: Int = 0) {
+        var remaining = Array(route.stops.dropFirst(stopsDone))
+        guard remaining.indices.contains(i) else { return }
+        let gone = remaining.remove(at: i)
+        replan(from: lastFix?.coordinate ?? state.snapped ?? route.points[0], heading: (lastFix?.speed ?? 0) > 2 ? lastFix?.heading : nil,
+               via: remaining, done: "Skipping \(gone.name)")
+    }
+
+    func clearMessage() { state.message = nil }
 
     var snapshot: NavSnapshot { NavSnapshot(destination: destination, eta: state.eta, remaining: state.remaining) }
 }

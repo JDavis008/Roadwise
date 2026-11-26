@@ -123,6 +123,7 @@ private fun RoutesSheet(vm: MainViewModel, s: Sheet.Routes) {
             FilterChip(settings.avoidFerries, { vm.updateSettings { it.copy(avoidFerries = !it.avoidFerries) }; vm.directions(s.dest, s.mode) }, { Text("Ferries") })
         }
     }
+    StopsEditor(vm, s)
     Spacer(Modifier.height(6.dp))
     when {
         s.loading -> Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -173,6 +174,33 @@ private fun RoutesSheet(vm: MainViewModel, s: Sheet.Routes) {
                 OutlinedButton(onClick = { vm.startNavigation(simulate = true) }, modifier = Modifier.height(52.dp)) {
                     Icon(Icons.Filled.PlayArrow, null); Spacer(Modifier.width(4.dp)); Text("Preview")
                 }
+            }
+        }
+    }
+}
+
+/** The stops on the way (numbered like their map pins), each removable, plus "Add stop". */
+@Composable
+private fun StopsEditor(vm: MainViewModel, s: Sheet.Routes) {
+    Column(Modifier.padding(top = 4.dp)) {
+        s.stops.forEachIndexed { i, p ->
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                Surface(shape = CircleShape, color = RwColors.Orange, contentColor = Color.White, modifier = Modifier.size(24.dp)) {
+                    Box(contentAlignment = Alignment.Center) { Text("${i + 1}", fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(p.name, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (p.address.isNotBlank()) Text(p.address, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { vm.removeRouteStop(i) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Close, "Remove stop ${p.name}", Modifier.size(18.dp)) }
+            }
+        }
+        if (s.stops.size < MainViewModel.MAX_STOPS) {
+            TextButton(onClick = { vm.beginAddStop() }, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                Icon(Icons.Filled.AddLocationAlt, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp))
+                Text(if (s.stops.isEmpty()) "Add stop" else "Add another stop")
             }
         }
     }

@@ -178,3 +178,112 @@ struct SearchHeader: View {
         }
     }
 }
+
+/// Picks a stop on the way: a category nearby (gas, food, coffee…), a search, or a saved place.
+/// Used from the routes card and while driving.
+struct StopPicker: View {
+    @EnvironmentObject var app: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var results: [Place] = []
+    @State private var status: String?
+    @State private var category: String?
+    @State private var task: Task<Void, Never>?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(Category.all) { c in
+                                Button { nearby(c) } label: {
+                                    Text("\(c.emoji) \(c.label)").font(.subheadline)
+                                        .padding(.horizontal, 12).padding(.vertical, 7)
+                                        .background(category == c.label ? AnyShapeStyle(Color.orange) : AnyShapeStyle(Color.secondary.opacity(0.15)), in: Capsule())
+                                        .foregroundStyle(category == c.label ? Color.white : Color.primary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                }
+                if let s = status { Text(s).foregroundStyle(.secondary) }
+                if !results.isEmpty {
+                    Section { ForEach(results) { row($0, emoji: $0.emoji ?? "📍") } }
+                } else if query.isEmpty && category == nil {
+                    Section("Saved") {
+                        if let h = app.saved.home { row(h, emoji: "🏠", title: "Home") }
+                        if let w = app.saved.work { row(w, emoji: "💼", title: "Work") }
+                        ForEach(app.saved.favorites) { row($0, emoji: "⭐") }
+                        ForEach(app.saved.recents.prefix(6)) { row($0, emoji: "🕘") }
+                    }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Add a stop")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search for a stop")
+            .onChange(of: query) { _, q in schedule(q) }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }
+    }
+
+    private func row(_ p: Place, emoji: String, title: String? = nil) -> some View {
+        Button { app.addStop(p) } label: {
+            HStack(spacing: 12) {
+                Text(emoji).frame(width: 32, height: 32).background(Circle().fill(Color.secondary.opacity(0.15)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title ?? p.name).fontWeight(.semibold).lineLimit(1)
+                    Text(p.address.isEmpty ? p.category : p.address).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if let here = app.here {
+                    Text(Units.distance(Geo.dist(here, p.coordinate), imperial: app.settings.imperial)).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func schedule(_ q: String) {
+        task?.cancel()
+        category = nil
+        let text = q.trimmingCharacters(in: .whitespaces)
+        guard text.count >= 2 else { results = []; status = nil; return }
+        task = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            status = "Searching…"
+            do {
+                let found = try await SearchService.search(text, near: app.here ?? app.mapCenter)
+                guard text == query.trimmingCharacters(in: .whitespaces) else { return }
+                results = found
+                status = found.isEmpty ? "No results" : nil
+            } catch {
+                status = "Search is unavailable right now (\(error.localizedDescription))."
+            }
+        }
+    }
+
+    private func nearby(_ c: Category) {
+        task?.cancel()
+        if category == c.label { category = nil; results = []; status = nil; return }
+        category = c.label
+        guard let near = app.here ?? app.origin ?? app.mapCenter else { status = "Waiting for your location…"; return }
+        status = "Finding \(c.label.lowercased()) nearby…"
+        results = []
+        task = Task {
+            do {
+                let found = try await SearchService.nearby(c, near: near)
+                guard category == c.label else { return }
+                results = found
+                status = found.isEmpty ? "Nothing found nearby." : nil
+            } catch {
+                status = "Couldn't load nearby places (\(error.localizedDescription))."
+            }
+        }
+    }
+}

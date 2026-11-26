@@ -57,6 +57,14 @@ fun SearchScreen(vm: MainViewModel, ui: UiState) {
                 },
             )
         }
+        if (ui.addingStop) Surface(color = RwColors.Orange.copy(alpha = 0.14f), shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.AddLocationAlt, null, tint = RwColors.Orange)
+                Spacer(Modifier.width(8.dp))
+                Text("Add a stop: pick a place or a category", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            }
+        }
         if (!online) Text("Offline: searching saved places and downloaded areas only", fontSize = 12.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp))
         if (ui.searching) LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 16.dp))
