@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.car.app.CarAppService
 import androidx.car.app.CarContext
+import androidx.car.app.CarToast
 import androidx.car.app.Screen
 import androidx.car.app.Session
 import androidx.car.app.navigation.NavigationManager
@@ -47,6 +48,8 @@ class RoadwiseSession : Session(), DefaultLifecycleObserver {
     }
 
     override fun onCreate(owner: LifecycleOwner) {
+        ensureLocationPermission()
+        watchConnectivity()
         val nm = carContext.getCarService(NavigationManager::class.java)
         navManager = nm
         nm.setNavigationManagerCallback(object : NavigationManagerCallback {
@@ -71,6 +74,44 @@ class RoadwiseSession : Session(), DefaultLifecycleObserver {
                     lastTripAt = now
                     runCatching { nm.updateTrip(buildTrip(s)) }
                 }
+            }
+        }
+    }
+
+    /**
+     * Android Auto can't show the system permission dialog on the car screen, so ask on the phone
+     * (the host shows "continue on your phone"). Without it the car map has no position.
+     */
+    private fun ensureLocationPermission() {
+        if (c.location.hasPermission) return
+        val perms = listOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)
+        runCatching {
+            carContext.requestPermissions(perms) { granted, _ ->
+                if (android.Manifest.permission.ACCESS_FINE_LOCATION in granted) c.location.apply()
+                else CarToast.makeText(carContext, "Roadwise needs location. Allow it on your phone.", CarToast.LENGTH_LONG).show()
+            }
+        }.onFailure {
+            Log.w(TAG, "requestPermissions", it)
+            CarToast.makeText(carContext, "Open Roadwise on your phone to allow location", CarToast.LENGTH_LONG).show()
+        }
+    }
+
+    /** When the connection drops, tell the driver whether downloaded maps cover where they are. */
+    private fun watchConnectivity() {
+        lifecycle.coroutineScope.launch {
+            var first = true
+            c.net.online.collect { online ->
+                val wasFirst = first; first = false
+                if (online) {
+                    if (!wasFirst) CarToast.makeText(carContext, "Back online", CarToast.LENGTH_SHORT).show()
+                    return@collect
+                }
+                val here = c.location.last ?: LatLon(c.prefs.lastLat, c.prefs.lastLon)
+                val covered = runCatching { c.db.areas().any { it.status == "ready" && it.bbox.contains(here) } }.getOrDefault(false)
+                CarToast.makeText(carContext,
+                    if (covered) "Offline - using downloaded maps, search and routing"
+                    else "Offline - this area isn't downloaded. Download it in Roadwise on your phone.",
+                    CarToast.LENGTH_LONG).show()
             }
         }
     }

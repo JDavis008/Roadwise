@@ -44,7 +44,19 @@ class CarMapRenderer(
     private var preview: Pair<List<Route>, Int>? = null
     private var previewDest: Place? = null
 
-    private val locListener: (Location) -> Unit = { controller?.updateLocation(it) }
+    /** True until the first real GPS fix centers the map (we start on the last saved spot). */
+    private var waitingForFix = false
+
+    private val locListener: (Location) -> Unit = { loc ->
+        controller?.let { ctl ->
+            ctl.updateLocation(loc)
+            if (waitingForFix && !c.nav.state.value.active) {
+                waitingForFix = false
+                ctl.moveTo(com.roadwise.app.core.LatLon(loc.latitude, loc.longitude), 15.0)
+                ctl.recenter(false)
+            }
+        }
+    }
 
     init { lifecycle.addObserver(this) }
 
@@ -76,7 +88,16 @@ class CarMapRenderer(
                 ctl.viewport = visible
                 map.uiSettings.isCompassEnabled = false
                 ctl.setMapMode(if (car.isDarkMode) MapStyles.NIGHT else MapStyles.DAY, c.prefs.current.satellite)
-                c.location.location.value?.let { ctl.updateLocation(it); ctl.moveTo(com.roadwise.app.core.LatLon(it.latitude, it.longitude), 15.0) }
+                val fix = c.location.location.value
+                if (fix != null) {
+                    ctl.updateLocation(fix); ctl.moveTo(com.roadwise.app.core.LatLon(fix.latitude, fix.longitude), 15.0)
+                } else {
+                    // No GPS yet (or no permission): start where the phone last was, not on the whole world.
+                    waitingForFix = true
+                    val saved = com.roadwise.app.core.LatLon(c.prefs.lastLat, c.prefs.lastLon)
+                    val isDefault = Math.abs(saved.lat - 39.8283) < 1e-3 && Math.abs(saved.lon + 98.5795) < 1e-3
+                    ctl.moveTo(saved, if (isDefault) 3.5 else 14.0)
+                }
                 ctl.setReports(c.reports.reports.value)
                 attachFeeds(ctl)
                 ctl.recenter(false)
