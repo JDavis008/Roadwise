@@ -8,6 +8,8 @@ enum Screen: Equatable { case browse, place, routes, nav }
 /// App-wide state: what's on screen, the selected place and routes, and the active trip.
 @MainActor
 final class AppModel: ObservableObject {
+    static let shared = AppModel()
+
     let settings: AppSettings
     let location: LocationService
     let reports: ReportService

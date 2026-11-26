@@ -23,6 +23,8 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Automatic
+        # CarPlay navigation entitlement (see CARPLAY.md). Signed builds fail until Apple grants it to the team.
+        CODE_SIGN_ENTITLEMENTS: Roadwise/Roadwise.entitlements
     info:
       path: Roadwise/Info.plist
       properties:
@@ -32,8 +34,14 @@ targets:
         LSRequiresIPhoneOS: true
         UILaunchScreen:
           UIColorName: ""
+        # The phone window stays SwiftUI's WindowGroup; the car screen gets CarPlaySceneDelegate.
         UIApplicationSceneManifest:
-          UIApplicationSupportsMultipleScenes: false
+          UIApplicationSupportsMultipleScenes: true
+          UISceneConfigurations:
+            CPTemplateApplicationSceneSessionRoleApplication:
+              - UISceneClassName: CPTemplateApplicationScene
+                UISceneConfigurationName: CarPlay
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).CarPlaySceneDelegate
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
@@ -61,12 +69,25 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.roadwise.app.uitests
         GENERATE_INFOPLIST_FILE: YES
         TEST_TARGET_NAME: Roadwise
+  RoadwiseTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: RoadwiseTests
+    dependencies:
+      - target: Roadwise
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.roadwise.app.tests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   Roadwise:
     build:
       targets:
         Roadwise: all
+        RoadwiseTests: [test]
         RoadwiseUITests: [test]
     test:
       targets:
+        - RoadwiseTests
         - RoadwiseUITests

@@ -27,4 +27,4 @@ In Xcode, select the **Roadwise** target › Signing & Capabilities, pick your T
 
 ## Status
 
-The app builds on Xcode (cloud Mac via Codemagic) and passes the UI smoke test on the iPhone simulator (latest: build #3, 2026-11-17). The test launches the app, allows location, searches "Ohio Stadium", opens the place card, plans routes, runs a preview drive and ends it. It has not been tried on a real iPhone yet. CarPlay is not included: Apple has to approve the CarPlay navigation entitlement for each developer account.
+The app builds on Xcode (cloud Mac via Codemagic) and passes the UI smoke test on the iPhone simulator (latest: build #3, 2026-11-17). The test launches the app, allows location, searches "Ohio Stadium", opens the place card, plans routes, runs a preview drive and ends it. It has not been tried on a real iPhone yet. CarPlay is built in (see [CARPLAY.md](CARPLAY.md)), but it only shows up in a car once Apple grants the CarPlay navigation entitlement to the developer account.
