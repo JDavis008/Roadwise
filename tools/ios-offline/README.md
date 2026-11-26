@@ -29,7 +29,11 @@ bash tools/ios-offline/build.sh /opt/roadwise/us /opt/roadwise/osm/us-latest.osm
 bash tools/ios-offline/build.sh /opt/roadwise/us /opt/roadwise/osm/us-latest.osm.pbf iowa     # just one
 ```
 
-The outputs land in `<work>/out/`. Upload every `.tar.xz` and `manifest.json` to the `offline-v1` release.
+The outputs land in `<work>/out/`. Upload every `.tar.xz` first and `manifest.json` last to the `offline-v1` release, so the app never lists a state whose file isn't there yet. Keep the release from being marked latest (`--latest=false`), because the Android APK link uses `/releases/latest/`.
+
+The full run (2026-11-25, 12 threads in WSL) took about 4 hours, most of it the US routing graph. The work folder ends up at about 50 GB (20 GB routing graph, 12 GB state extracts, 7 GB search indexes, 11 GB packs), and the graph build needs more scratch space on top of that while it runs. The 51 packs total 11 GB; the largest is New York at 698 MB, well under GitHub's 2 GB per-file limit.
+
+To check a pack, unpack it and route with pyvalhalla against just its `valhalla_tiles` (Des Moines → Davenport on the Iowa pack: 169 mi, 2 h 33 min, with an alternate).
 
 ## Test pack
 
