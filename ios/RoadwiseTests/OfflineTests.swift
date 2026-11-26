@@ -49,8 +49,10 @@ final class OfflineTests: XCTestCase {
     func testRouteWithAStopOffline() async throws {
         let from = Coord(latitude: 41.977, longitude: -91.668), to = Coord(latitude: 42.005, longitude: -91.645)
         let stop = Waypoint(coordinate: Coord(latitude: 41.985, longitude: -91.66), name: "Coffee stop")
-        let direct = try XCTUnwrap(try await RoutingService.offlineRoutes(from: from, to: to, mode: .drive, options: RouteOptions(), data: Self.data).first)
-        let r = try XCTUnwrap(try await RoutingService.offlineRoutes(from: from, to: to, mode: .drive, options: RouteOptions(), via: [stop], data: Self.data).first)
+        let plain = try await RoutingService.offlineRoutes(from: from, to: to, mode: .drive, options: RouteOptions(), data: Self.data)
+        let withStop = try await RoutingService.offlineRoutes(from: from, to: to, mode: .drive, options: RouteOptions(), via: [stop], data: Self.data)
+        let direct = try XCTUnwrap(plain.first)
+        let r = try XCTUnwrap(withStop.first)
         XCTAssertEqual(r.stops, [stop])
         XCTAssertEqual(r.stopIndex.count, 1)
         XCTAssertLessThan(Geo.dist(r.points[r.stopIndex[0]], stop.coordinate), 150, "the route should go to the stop")
