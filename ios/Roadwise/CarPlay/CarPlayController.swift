@@ -153,7 +153,7 @@ final class CarPlayController: NSObject, CPMapTemplateDelegate, CPSearchTemplate
             let found = (try? await SearchService.nearby(cat, near: here)) ?? []
             done()
             if found.isEmpty {
-                message(cat.label, online ? "Nothing found nearby." : "You're offline. Nearby search needs a connection.")
+                message(cat.label, online || OfflineData.shared.hasData ? "Nothing found nearby." : "You're offline and this area isn't downloaded.")
                 return
             }
             let items = found.prefix(12).map { pickable(CarTemplates.placeItem($0, near: here, imperial: imperial)) }
@@ -174,7 +174,7 @@ final class CarPlayController: NSObject, CPMapTemplateDelegate, CPSearchTemplate
             let here = app.here ?? app.mapCenter
             let local = CarTemplates.localMatches(searchText, saved: app.saved).prefix(4)
                 .map { CarTemplates.placeItem($0, symbolName: "star.fill", near: here, imperial: imperial) }
-            guard online, searchText.trimmingCharacters(in: .whitespaces).count >= 2 else { completionHandler(Array(local)); return }
+            guard searchText.trimmingCharacters(in: .whitespaces).count >= 2 else { completionHandler(Array(local)); return }
             searchTask = Task {
                 try? await Task.sleep(nanoseconds: 350_000_000)
                 guard !Task.isCancelled else { return }
@@ -220,7 +220,7 @@ final class CarPlayController: NSObject, CPMapTemplateDelegate, CPSearchTemplate
             guard !Task.isCancelled, app.place == p else { return }
             guard !app.routes.isEmpty, let from = app.origin ?? app.mapCenter else {
                 let why = app.routeError ?? "No route found."
-                message(p.name, online ? why : "You're offline. Planning a new route needs a connection; a trip that's already running keeps guiding you offline.")
+                message(p.name, why)
                 return
             }
             let t = CarTemplates.trip(from: from, to: p, routes: app.routes, imperial: imperial)
@@ -358,9 +358,15 @@ final class CarPlayController: NSObject, CPMapTemplateDelegate, CPSearchTemplate
     private func setOnline(_ ok: Bool) {
         guard ok != online else { return }
         online = ok
-        if ok { notice("Back online", "Search and new routes work again.") }
-        else if app.nav != nil { notice("You're offline", "Guidance keeps going on this route. Rerouting needs a connection.") }
-        else { notice("You're offline", "Saved and recent places still work. Search and new routes need a connection.") }
+        if ok { notice("Back online", "Live search and traffic reports are back."); return }
+        let here = app.here ?? app.mapCenter
+        if let here, OfflineData.shared.covers(here) {
+            notice("You're offline", "Using your downloaded maps, search and route planning.")
+        } else if app.nav != nil {
+            notice("You're offline", "Guidance keeps going on this route. This area isn't downloaded, so rerouting needs a connection.")
+        } else {
+            notice("You're offline", "This area isn't downloaded. Download your state in Roadwise on your iPhone: Settings > Offline maps.")
+        }
     }
 
     /// Short banner over the map that goes away on its own.

@@ -1,5 +1,5 @@
 import SwiftUI
-import MapKit
+
 
 struct ContentView: View {
     @EnvironmentObject var app: AppModel
@@ -8,7 +8,7 @@ struct ContentView: View {
     @State private var showReport = false
     @State private var showShare = false
     @State private var selectedReport: Report?
-    @State private var mapHeading: Double = 0
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack {
@@ -48,61 +48,8 @@ struct ContentView: View {
     // MARK: map
 
     private var map: some View {
-        MapReader { proxy in
-            Map(position: $app.camera) {
-                if let lines = navLines() {
-                    // Navigating: the part already driven is gray, the rest blue.
-                    MapPolyline(coordinates: lines.done)
-                        .stroke(Color.gray.opacity(0.8), style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
-                    MapPolyline(coordinates: lines.rest)
-                        .stroke(Color.blue, style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
-                } else {
-                    ForEach(Array(app.routes.enumerated()), id: \.element.id) { i, r in
-                        MapPolyline(coordinates: r.points)
-                            .stroke(i == app.selected ? Color.blue : Color.gray.opacity(0.75),
-                                    style: StrokeStyle(lineWidth: i == app.selected ? 8 : 6, lineCap: .round, lineJoin: .round))
-                    }
-                }
-                if let p = app.place {
-                    Marker(p.name, coordinate: p.coordinate).tint(.red)
-                }
-                ForEach(app.reports.reports) { r in
-                    Annotation(r.kind.label, coordinate: r.coordinate) {
-                        Text(r.kind.emoji)
-                            .font(.system(size: 16))
-                            .frame(width: 32, height: 32)
-                            .background(Circle().fill(r.kind.color))
-                            .overlay(Circle().stroke(.white, lineWidth: 2))
-                            .shadow(radius: 2)
-                            .onTapGesture { selectedReport = r }
-                    }
-                    .annotationTitles(.hidden)
-                }
-                if let f = app.location.fix {
-                    Annotation("", coordinate: app.nav?.state.snapped ?? f.coordinate, anchor: .center) {
-                        Puck().rotationEffect(.degrees(f.heading - mapHeading))
-                    }
-                    .annotationTitles(.hidden)
-                }
-            }
-            .mapStyle(settings.satellite ? .hybrid(elevation: .realistic) : .standard(elevation: .realistic))
-            .mapControls { MapCompass(); MapScaleView() }
-            .onMapCameraChange(frequency: .onEnd) { ctx in
-                mapHeading = ctx.camera.heading
-                app.mapCenter = ctx.region.center
-                Task { await app.reports.sync(around: ctx.region.center) }
-            }
-            .onMapCameraChange(frequency: .continuous) { ctx in mapHeading = ctx.camera.heading }
-            .simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in if app.following { app.following = false } })
-            .simultaneousGesture(
-                LongPressGesture(minimumDuration: 0.5)
-                    .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
-                    .onEnded { value in
-                        if case .second(true, let drag?) = value, let c = proxy.convert(drag.location, from: .local) { app.dropPin(c) }
-                    }
-            )
+        RoadwiseMapView(app: app, dark: colorScheme == .dark, satellite: settings.satellite) { selectedReport = $0 }
             .ignoresSafeArea()
-        }
     }
 
     // MARK: overlays

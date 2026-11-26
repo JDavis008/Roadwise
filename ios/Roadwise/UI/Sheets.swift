@@ -121,6 +121,11 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section("Map") {
+                    NavigationLink {
+                        OfflineMapsView().environmentObject(app)
+                    } label: {
+                        Label("Offline maps", systemImage: "arrow.down.circle")
+                    }
                     Toggle("Satellite view", isOn: $settings.satellite)
                     Picker("Units", selection: $settings.imperial) {
                         Text("Miles").tag(true)
@@ -159,7 +164,7 @@ struct SettingsView: View {
                     Text("The same Roadwise server the Android app uses. Leave it blank to keep reports on this phone.")
                 }
                 Section("About") {
-                    Text("Roadwise for iPhone. Free and open source, using OpenStreetMap data with Valhalla routing and Photon search. Maps by Apple.")
+                    Text("Roadwise for iPhone. Free and open source, with maps and data © OpenStreetMap contributors (ODbL), map tiles by OpenFreeMap, routing by Valhalla (online and on the phone) and search by Photon.")
                         .font(.footnote)
                     Link("Source code on GitHub", destination: URL(string: "https://github.com/JDavis008/Roadwise")!)
                 }

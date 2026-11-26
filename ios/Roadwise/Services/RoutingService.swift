@@ -1,24 +1,62 @@
 import Foundation
 
-/// Online routing through the public Valhalla server (FOSSGIS), like routing/OnlineRouter.kt.
+/// Routing: the public Valhalla server (FOSSGIS) when there's signal, like routing/OnlineRouter.kt,
+/// and the same Valhalla engine on the phone over downloaded states when there isn't
+/// (Offline/OfflineRouter.swift). Both answer in the same JSON, parsed the same way.
 enum RoutingService {
     static let base = "https://valhalla1.openstreetmap.de"
 
     static func routes(from: Coord, to: Coord, mode: TravelMode, options: RouteOptions,
-                       heading: Double? = nil, avoid: [Coord] = [], alternates: Bool = true) async throws -> [Route] {
-        let json: JSON
+                       heading: Double? = nil, avoid: [Coord] = [], alternates: Bool = true,
+                       offline data: OfflineData = .shared) async throws -> [Route] {
+        let canOffline = data.covers(from, to)
+        if Connectivity.shared.online || !canOffline {
+            do {
+                return try trips(await online(request(from, to, mode, options, heading, avoid, alternates), avoid: avoid,
+                                              fallback: request(from, to, mode, options, heading, [], alternates)), mode: mode, dest: to)
+            } catch {
+                guard canOffline else {
+                    if !Connectivity.shared.online {
+                        throw NetError(message: data.hasData ? "You're offline and this trip goes outside your downloaded states"
+                                                             : "You're offline. Download your state in Settings > Offline maps to plan routes with no signal")
+                    }
+                    throw error
+                }
+            }
+        }
+        return try await offlineRoutes(from: from, to: to, mode: mode, options: options, heading: heading, avoid: avoid, alternates: alternates, data: data)
+    }
+
+    /// Plans on the phone only (tests and the fallback above).
+    static func offlineRoutes(from: Coord, to: Coord, mode: TravelMode, options: RouteOptions, heading: Double? = nil,
+                              avoid: [Coord] = [], alternates: Bool = true, data: OfflineData = .shared) async throws -> [Route] {
+        let req = request(from, to, mode, options, heading, avoid, alternates)
+        let plain = request(from, to, mode, options, heading, [], alternates)
+        let json: JSON = try await Task.detached(priority: .userInitiated) {
+            do { return try data.router.route(req) } catch {
+                guard !avoid.isEmpty else { throw error }
+                return try data.router.route(plain)
+            }
+        }.value
+        return try trips(json, mode: mode, dest: to)
+    }
+
+    private static func online(_ req: JSON, avoid: [Coord], fallback: JSON) async throws -> JSON {
         do {
-            json = try await Net.post(URL(string: "\(base)/route")!, body: request(from, to, mode, options, heading, avoid, alternates), timeout: 25)
+            return try await Net.post(URL(string: "\(base)/route")!, body: req, timeout: 25)
         } catch {
             // A closure point that can't be matched to a road makes Valhalla reject the whole request.
             guard !avoid.isEmpty else { throw error }
-            json = try await Net.post(URL(string: "\(base)/route")!, body: request(from, to, mode, options, heading, [], alternates), timeout: 25)
+            return try await Net.post(URL(string: "\(base)/route")!, body: fallback, timeout: 25)
         }
+    }
+
+    private static func trips(_ json: JSON, mode: TravelMode, dest: Coord) throws -> [Route] {
         guard let trip = json.obj("trip") else { throw NetError(message: "No route found") }
-        var out = [parse(trip, mode: mode, dest: to)]
+        var out = [parse(trip, mode: mode, dest: dest)]
         for alt in json.arr("alternates") {
             if let t = alt.obj("trip") {
-                let r = parse(t, mode: mode, dest: to)
+                let r = parse(t, mode: mode, dest: dest)
                 if out.allSatisfy({ overlap(r, $0) < 0.85 }) { out.append(r) }
             }
         }
@@ -120,7 +158,15 @@ enum RoutingService {
             "encoded_polyline": Geo.encodePolyline(route.points), "shape_match": "edge_walk", "costing": "auto",
             "filters": ["attributes": ["edge.speed_limit", "edge.begin_shape_index", "edge.end_shape_index"], "action": "include"] as JSON,
         ]
-        guard let json = try? await Net.post(URL(string: "\(base)/trace_attributes")!, body: body, timeout: 25) else { return nil }
+        let json: JSON
+        if Connectivity.shared.online, let j = try? await Net.post(URL(string: "\(base)/trace_attributes")!, body: body, timeout: 25) {
+            json = j
+        } else if let first = route.points.first, OfflineData.shared.covers(first, route.destination),
+                  let j = try? await Task.detached(operation: { try OfflineData.shared.router.traceAttributes(body) }).value {
+            json = j   // same answer from the downloaded tiles
+        } else {
+            return nil
+        }
         var limits = [Int](repeating: 0, count: route.points.count)
         for e in json.arr("edges") {
             let lim = e.int("speed_limit")

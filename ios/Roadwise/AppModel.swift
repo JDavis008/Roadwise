@@ -1,7 +1,6 @@
 import SwiftUI
 import Combine
 import UIKit
-import MapKit
 
 enum Screen: Equatable { case browse, place, routes, nav }
 
@@ -23,7 +22,8 @@ final class AppModel: ObservableObject {
     @Published var routeError: String?
     @Published var loadingRoutes = false
     @Published var nav: NavEngine?
-    @Published var camera: MapCameraPosition = .userLocation(fallback: .automatic)
+    /// The latest thing the map should do with its camera (RoadwiseMapView carries it out).
+    @Published var cameraCommand: CameraCommand?
     @Published var following = false
     @Published var simulating = false
     @Published var saved: SavedPlaces
@@ -42,6 +42,7 @@ final class AppModel: ObservableObject {
         live = LiveShareService(settings: s)
         saved = SavedPlaces.load()
         voice.enabled = s.voice
+        _ = OfflineStore.shared   // resumes map downloads cut off last time
         location.onFix = { [weak self] f in self?.onFix(f) }
         live.snapshot = { [weak self] in (self?.location.fix, self?.nav?.snapshot) }
         // Keep child objects' changes flowing to views that observe this model.
@@ -85,11 +86,9 @@ final class AppModel: ObservableObject {
         if screen == .nav, let n = nav {
             let center = n.state.snapped ?? f.coordinate
             let distance: Double = f.speed > 25 ? 1400 : f.speed > 15 ? 1000 : 650
-            withAnimation(.linear(duration: 0.9)) {
-                camera = .camera(MapCamera(centerCoordinate: center, distance: distance, heading: n.state.bearing ?? f.heading, pitch: 55))
-            }
+            cameraCommand = CameraCommand(.look(center: center, distance: distance, heading: n.state.bearing ?? f.heading, pitch: 55))
         } else {
-            withAnimation { camera = .camera(MapCamera(centerCoordinate: f.coordinate, distance: 1800, heading: 0, pitch: 0)) }
+            cameraCommand = CameraCommand(.look(center: f.coordinate, distance: 1800, heading: 0, pitch: 0))
         }
     }
 
@@ -106,7 +105,7 @@ final class AppModel: ObservableObject {
         place = p
         routes = []
         following = false
-        withAnimation { camera = .region(MKCoordinateRegion(center: p.coordinate, latitudinalMeters: 1500, longitudinalMeters: 1500)) }
+        cameraCommand = CameraCommand(.look(center: p.coordinate, distance: 1500, heading: 0, pitch: 0))
         screen = .place
     }
 
@@ -149,13 +148,9 @@ final class AppModel: ObservableObject {
 
     func fitRoutes() {
         guard !routes.isEmpty else { return }
-        var rect = MKMapRect.null
-        for r in routes { for (i, p) in r.points.enumerated() where i % 5 == 0 || i == r.points.count - 1 {
-            let mp = MKMapPoint(p)
-            rect = rect.union(MKMapRect(x: mp.x, y: mp.y, width: 1, height: 1))
-        } }
-        let padded = rect.insetBy(dx: -rect.width * 0.15, dy: -rect.height * 0.35)
-        withAnimation { camera = .rect(padded) }
+        var pts: [Coord] = []
+        for r in routes { for (i, p) in r.points.enumerated() where i % 5 == 0 || i == r.points.count - 1 { pts.append(p) } }
+        cameraCommand = CameraCommand(.fit(pts))
     }
 
     // MARK: navigation
@@ -190,7 +185,7 @@ final class AppModel: ObservableObject {
         following = false
         UIApplication.shared.isIdleTimerDisabled = false
         location.setNavigating(false)
-        withAnimation { camera = .userLocation(fallback: .automatic) }
+        if let f = location.fix { cameraCommand = CameraCommand(.look(center: f.coordinate, distance: 1800, heading: 0, pitch: 0)) }
     }
 
     /// Drives the route with simulated GPS at about 3x real time.
@@ -246,4 +241,19 @@ struct SavedPlaces: Codable {
         recents = Array(recents.prefix(12))
         save()
     }
+}
+
+/// A one-off instruction for the map camera. Each command has its own id, so repeating the
+/// same target still moves the map.
+struct CameraCommand: Equatable {
+    enum Target {
+        /// Center on a point, `distance` meters across, turned to `heading`, tilted `pitch` degrees.
+        case look(center: Coord, distance: Double, heading: Double, pitch: Double)
+        /// Show all these points.
+        case fit([Coord])
+    }
+    let id = UUID()
+    let target: Target
+    init(_ target: Target) { self.target = target }
+    static func == (a: CameraCommand, b: CameraCommand) -> Bool { a.id == b.id }
 }

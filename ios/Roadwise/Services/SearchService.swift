@@ -1,12 +1,25 @@
 import Foundation
 
-/// Place search through Photon (Komoot, OpenStreetMap data), like search/SearchRepo.kt.
+/// Place search: Photon (Komoot, OpenStreetMap data) when there's signal, like search/SearchRepo.kt,
+/// and the downloaded state indexes (Offline/OfflineSearch.swift) when there isn't or Photon fails.
 enum SearchService {
     static let base = "https://photon.komoot.io"
 
-    static func search(_ query: String, near: Coord?) async throws -> [Place] {
+    static func search(_ query: String, near: Coord?, offline data: OfflineData = .shared) async throws -> [Place] {
         let q = query.trimmingCharacters(in: .whitespaces)
         if let c = coordinates(q) { return [c] }
+        if Connectivity.shared.online {
+            do {
+                let found = try await photon(q, near: near)
+                if !found.isEmpty || data.search.isEmpty { return found }
+            } catch {
+                if data.search.isEmpty { throw error }
+            }
+        }
+        return await Task.detached { data.search.search(q, near: near) }.value
+    }
+
+    private static func photon(_ q: String, near: Coord?) async throws -> [Place] {
         var params = ["q": q, "limit": "15", "lang": "en"]
         if let n = near {
             params["lat"] = String(format: "%.5f", n.latitude)
@@ -18,7 +31,21 @@ enum SearchService {
         return dedupe(json.arr("features").compactMap(place))
     }
 
-    static func nearby(_ cat: Category, near: Coord) async throws -> [Place] {
+    static func nearby(_ cat: Category, near: Coord, offline data: OfflineData = .shared) async throws -> [Place] {
+        let local: () async -> [Place] = { await Task.detached { data.search.nearby(label: cat.label, emoji: cat.emoji, near: near) }.value }
+        guard Connectivity.shared.online else { return await local() }
+        do {
+            let found = try await photonNearby(cat, near: near)
+            if !found.isEmpty { return found }
+            return await local()
+        } catch {
+            let found = await local()
+            if found.isEmpty && data.search.isEmpty { throw error }
+            return found
+        }
+    }
+
+    private static func photonNearby(_ cat: Category, near: Coord) async throws -> [Place] {
         func fetch(_ radiusKm: Int) async throws -> [Place] {
             var c = URLComponents(string: "\(base)/reverse")!
             c.queryItems = [
@@ -33,9 +60,15 @@ enum SearchService {
         return Array(dedupe(res).sorted { Geo.dist(near, $0.coordinate) < Geo.dist(near, $1.coordinate) }.prefix(40))
     }
 
-    static func reverse(_ p: Coord) async -> Place {
-        if let url = Net.url("\(base)/reverse", ["lat": String(p.latitude), "lon": String(p.longitude), "lang": "en", "limit": "1"]),
+    static func reverse(_ p: Coord, offline data: OfflineData = .shared) async -> Place {
+        if Connectivity.shared.online,
+           let url = Net.url("\(base)/reverse", ["lat": String(p.latitude), "lon": String(p.longitude), "lang": "en", "limit": "1"]),
            let json = try? await Net.get(url, timeout: 6), let first = json.arr("features").first, var pl = place(first) {
+            pl.lat = p.latitude
+            pl.lon = p.longitude
+            return pl
+        }
+        if var pl = await Task.detached(operation: { data.search.reverse(p) }).value {
             pl.lat = p.latitude
             pl.lon = p.longitude
             return pl
