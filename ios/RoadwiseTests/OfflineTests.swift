@@ -84,5 +84,19 @@ final class OfflineTests: XCTestCase {
         let n = OfflineStore.tileCount([40.37, -96.64, 43.5, -90.14], maxZoom: 14)
         XCTAssertGreaterThan(n, 50_000)
         XCTAssertLessThan(n, 200_000)
+        XCTAssertEqual(OfflineStore.mapZoom([40.37, -96.64, 43.5, -90.14]), 14)
+        // Texas still gets street level; Alaska's huge box stops at zoom 12.
+        XCTAssertEqual(OfflineStore.mapZoom([25.6955, -106.6494, 36.5215, -93.019]), 14)
+        XCTAssertEqual(OfflineStore.mapZoom([49.8089, -180.0, 72.9885, -129.7998]), 12)
+    }
+
+    func testHawaiiMapTilesUseTheMainIslands() throws {
+        let json = #"{"id":"hawaii","name":"Hawaii","abbr":"HI","bbox":[15.921,-179.5994,29.0211,-142.6511],"url":"x","bytes":1,"unpackedBytes":1,"sha256":"x","tiles":1,"mapBbox":[18.86,-160.3,22.3,-154.75]}"#
+        let s = try JSONDecoder().decode(OfflineState.self, from: Data(json.utf8))
+        XCTAssertEqual(s.mapBounds, [18.86, -160.3, 22.3, -154.75])
+        XCTAssertEqual(OfflineStore.mapZoom(s.mapBounds), 14)
+        // Older manifests without mapBbox still decode and use the state box.
+        let old = try JSONDecoder().decode(OfflineState.self, from: Data(json.replacingOccurrences(of: #","mapBbox":[18.86,-160.3,22.3,-154.75]"#, with: "").utf8))
+        XCTAssertEqual(old.mapBounds, old.bbox)
     }
 }

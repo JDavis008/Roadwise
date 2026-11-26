@@ -14,6 +14,12 @@ struct OfflineState: Codable, Identifiable, Hashable {
     let sha256: String
     let tiles: Int
 
+    /// A smaller box for the map tiles, where most of the state's box is ocean (Hawaii).
+    var mapBbox: [Double]? = nil
+
+    /// The area to download map tiles for.
+    var mapBounds: [Double] { mapBbox?.count == 4 ? mapBbox! : bbox }
+
     func contains(_ c: Coord) -> Bool {
         bbox.count == 4 && c.latitude >= bbox[0] && c.latitude <= bbox[2] && c.longitude >= bbox[1] && c.longitude <= bbox[3]
     }

@@ -18,6 +18,13 @@ import tarfile
 
 LEVEL_SIZE = {0: 4.0, 1: 1.0, 2: 0.25}
 
+# Smaller boxes for the map tiles where a state's outline is mostly open ocean
+# (routing and search still cover the whole state). The app also lowers the top
+# map zoom for any state still over its tile budget, such as Alaska.
+MAP_BBOX = {
+    "hawaii": [18.86, -160.3, 22.3, -154.75],  # the main islands, Niihau to the Big Island
+}
+
 
 def poly_bbox(path, slug):
     lats, lons = [], []
@@ -103,6 +110,8 @@ def main(tile_dir, work, out, base_url, only):
             "bytes": os.path.getsize(xz_path), "unpackedBytes": raw,
             "sha256": sha256(xz_path), "tiles": len(picked),
         }
+        if slug in MAP_BBOX:
+            by_slug[slug]["mapBbox"] = MAP_BBOX[slug]
         print(f"{slug}: {len(picked)} tiles, {raw / 1e6:.0f} MB -> {os.path.getsize(xz_path) / 1e6:.0f} MB")
         manifest["states"] = sorted(by_slug.values(), key=lambda x: x["name"])
         json.dump(manifest, open(manifest_path, "w"), indent=1)

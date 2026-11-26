@@ -9,7 +9,17 @@ final class OfflineStore: NSObject, ObservableObject {
     static let shared = OfflineStore()
     static let manifestURL = URL(string: "https://github.com/JDavis008/Roadwise/releases/download/offline-v1/manifest.json")!
     /// Map tiles go down to street level, the same as Android.
-    static let maxZoom = 14.0
+    static let maxZoom = 14
+    /// Most states fit at street level (Texas is about 480,000 tiles). Bigger ones, like
+    /// Alaska at 7 million, stop a zoom level or two higher so the download stays sane.
+    static let maxTiles = 600_000
+
+    /// The deepest map zoom to download for a box within the tile budget.
+    nonisolated static func mapZoom(_ b: [Double]) -> Int {
+        var z = maxZoom
+        while z > 10 && tileCount(b, maxZoom: z) > maxTiles { z -= 1 }
+        return z
+    }
 
     struct Job: Equatable {
         var step: String
@@ -69,7 +79,8 @@ final class OfflineStore: NSObject, ObservableObject {
 
     /// Rough map tile size for a state, from its tile count (country tiles are small).
     func mapEstimateBytes(_ s: OfflineState) -> Int64 {
-        let tiles = Self.tileCount(s.bbox, maxZoom: Int(Self.maxZoom))
+        let b = s.mapBounds
+        let tiles = Self.tileCount(b, maxZoom: Self.mapZoom(b))
         let kb = tiles > 200_000 ? 9.0 : tiles > 40_000 ? 13.0 : 22.0
         return Int64(Double(tiles) * kb * 1024)
     }
@@ -142,13 +153,15 @@ final class OfflineStore: NSObject, ObservableObject {
 
     func startMapPacks(_ s: OfflineState) {
         let existing = (MLNOfflineStorage.shared.packs ?? []).filter { tag($0)?.state == s.id }
-        let bounds = MLNCoordinateBounds(sw: Coord(latitude: s.bbox[0], longitude: s.bbox[1]), ne: Coord(latitude: s.bbox[2], longitude: s.bbox[3]))
+        let b = s.mapBounds
+        let bounds = MLNCoordinateBounds(sw: Coord(latitude: b[0], longitude: b[1]), ne: Coord(latitude: b[2], longitude: b[3]))
+        let zoom = Double(Self.mapZoom(b))
         for (style, url) in [("day", MapStyles.day), ("night", MapStyles.night)] {
             if let p = existing.first(where: { tag($0)?.style == style }) {
                 if p.state != .complete { p.resume() }
                 continue
             }
-            let region = MLNTilePyramidOfflineRegion(styleURL: url, bounds: bounds, fromZoomLevel: 0, toZoomLevel: Self.maxZoom)
+            let region = MLNTilePyramidOfflineRegion(styleURL: url, bounds: bounds, fromZoomLevel: 0, toZoomLevel: zoom)
             guard let ctx = try? JSONEncoder().encode(PackTag(state: s.id, style: style)) else { continue }
             MLNOfflineStorage.shared.addPack(for: region, withContext: ctx) { pack, _ in pack?.resume() }
         }
