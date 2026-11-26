@@ -74,7 +74,7 @@ final class OfflineStore: NSObject, ObservableObject {
         return Int64(Double(tiles) * kb * 1024)
     }
 
-    static func tileCount(_ b: [Double], maxZoom: Int) -> Int {
+    nonisolated static func tileCount(_ b: [Double], maxZoom: Int) -> Int {
         func x(_ lon: Double, _ z: Int) -> Int { Int((lon + 180) / 360 * Double(1 << z)) }
         func y(_ lat: Double, _ z: Int) -> Int {
             let r = lat * .pi / 180

@@ -13,10 +13,13 @@ The phone and the car share one `AppModel`, so a trip started on the phone shows
 
 ## Offline
 
-- A trip that's already running keeps guiding you with no signal: the route, voice and hazard warnings are all on the phone. Rerouting needs a connection.
-- Search with no signal shows matching saved and recent places.
-- When the connection drops or comes back, a banner on the car screen says so.
-- Planning a new route, nearby search and map tiles you haven't viewed yet need a connection. The iPhone app has no downloadable offline maps or offline routing yet; the Android app does.
+Download your state on the iPhone first: **Settings › Offline maps**. In a downloaded state, CarPlay works fully with no signal:
+
+- **Maps:** the street map, light and dark.
+- **Search:** places, streets, towns and addresses, plus nearby categories.
+- **Routes and guidance:** new routes, rerouting, speed limits and spoken turn-by-turn, all planned on the phone.
+
+When the connection drops or comes back, a banner on the car screen says so, and whether the area you're in is downloaded. Outside downloaded states, a trip that's already running keeps guiding you, but rerouting and search need a connection. Satellite imagery and live reports from other drivers always need a connection.
 
 ## Why it doesn't show up in the car yet
 

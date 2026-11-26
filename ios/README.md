@@ -1,10 +1,13 @@
 # Roadwise for iPhone (native app)
 
-A SwiftUI version of Roadwise for iOS 17 and later. It uses Apple Maps for the map and the same free services as the Android app:
+A SwiftUI version of Roadwise for iOS 17 and later, with CarPlay. It uses the same free map data and services as the Android app:
 
-- Valhalla for routing, alternative routes, avoid options and speed limits
-- Photon for search and nearby places
+- MapLibre with OpenFreeMap tiles for the map (light, dark and satellite)
+- Valhalla for routing, alternative routes, avoid options and speed limits: the public server online, and the same engine on the phone ([valhalla-mobile](https://github.com/Rallista/valhalla-mobile)) offline
+- Photon for search and nearby places online, and a downloaded search index offline
 - the optional Roadwise server for shared reports and live location
+
+**Offline:** Settings › Offline maps downloads a whole state: street maps (light and dark), an offline search index, and routing tiles. Maps, search, route planning, rerouting and speed limits then work with no signal, on the phone and in CarPlay. The routing and search packs are built by [`tools/ios-offline`](../tools/ios-offline/README.md).
 
 **Features:** speed-camera alerts, a gray trail for the part of the route already driven, place search and nearby categories, Home/Work/Favorites and recent places, routes for car, bike and walking with up to 3 alternatives, voice turn-by-turn that keeps going with the screen locked, automatic rerouting, speed limit and a speeding chime, Waze-style reports with spoken alerts and routing around closures, live location sharing, satellite view, and a Preview drive.
 
