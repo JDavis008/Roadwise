@@ -27,7 +27,7 @@ final class CarPlayTests: XCTestCase {
         XCTAssertEqual(trip.routeChoices.count, 2)
         XCTAssertEqual(trip.routeChoices[0].userInfo as? Int, 0)
         XCTAssertEqual(trip.routeChoices[1].userInfo as? Int, 1)
-        XCTAssertEqual(trip.routeChoices[1].summaryVariants?.first, "via Broad Street")
+        XCTAssertEqual(trip.routeChoices[1].summaryVariants.first, "via Broad Street")
         XCTAssertTrue(trip.routeChoices[1].additionalInformationVariants?.first?.contains("Tolls") ?? false)
         XCTAssertEqual(trip.destination.name, "Ohio Stadium")
         XCTAssertEqual((trip.userInfo as? Place)?.name, "Ohio Stadium")
