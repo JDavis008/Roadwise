@@ -16,6 +16,18 @@ final class OfflineSearch: @unchecked Sendable {
         "Hotels": ["hotel", "motel"], "Hospitals": ["hospital"],
     ]
 
+    /// US street-name abbreviations, both ways.
+    static let synonyms: [String: [String]] = {
+        let pairs = [("rd", "road"), ("st", "street"), ("ave", "avenue"), ("blvd", "boulevard"), ("dr", "drive"), ("ln", "lane"),
+                     ("hwy", "highway"), ("pkwy", "parkway"), ("ct", "court"), ("pl", "place"), ("cir", "circle"), ("ter", "terrace"),
+                     ("trl", "trail"), ("sq", "square"), ("fwy", "freeway"), ("expy", "expressway"), ("mt", "mount"), ("ft", "fort"),
+                     ("ne", "northeast"), ("nw", "northwest"), ("se", "southeast"), ("sw", "southwest"),
+                     ("n", "north"), ("s", "south"), ("e", "east"), ("w", "west"), ("st", "saint")]
+        var out: [String: [String]] = [:]
+        for (a, b) in pairs { out[a, default: []].append(b); out[b, default: []].append(a) }
+        return out
+    }()
+
     init(dir: URL) { self.dir = dir }
 
     deinit { closeAll() }
@@ -36,13 +48,19 @@ final class OfflineSearch: @unchecked Sendable {
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }.prefix(6)
         guard !tokens.isEmpty else { return [] }
-        let match = tokens.map { "\"\($0)\"*" }.joined(separator: " ")
-        let first = tokens.joined(separator: " ")
+        // Each word must match; "rd" also finds "Road", "ne" finds "Northeast" and so on.
+        let match = tokens.map { t -> String in
+            let words = [t] + (Self.synonyms[t] ?? [])
+            let terms = words.map { $0.count > 1 ? "\"\($0)\"*" : "\"\($0)\"" }
+            return terms.count == 1 ? terms[0] : "(" + terms.joined(separator: " OR ") + ")"
+        }.joined(separator: " AND ")
+        let typed = tokens.joined(separator: " ")
         var scored: [(Place, Double)] = []
-        rows("SELECT name, address, kind, emoji, lat, lon, boost, bm25(places, 4.0, 1.0) FROM places WHERE places MATCH ? ORDER BY bm25(places, 4.0, 1.0) LIMIT 150",
+        rows("SELECT name, address, kind, emoji, lat, lon, boost, bm25(places, 4.0, 1.0) FROM places WHERE places MATCH ? ORDER BY bm25(places, 4.0, 1.0) LIMIT 300",
              [match]) { p, boost, bm25 in
-            var score = -bm25 * (1 + boost / 3)
-            if p.name.lowercased().hasPrefix(first) { score += 4 }
+            let name = p.name.lowercased()
+            var score = -bm25 + boost * 1.5
+            if name == typed { score += 8 } else if name.hasPrefix(typed) { score += 3 }
             if let near { score -= log10(1 + Geo.dist(near, p.coordinate) / 1000) * 2.5 }
             scored.append((p, score))
         }
